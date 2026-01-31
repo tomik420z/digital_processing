@@ -1,8 +1,10 @@
 #include <iostream>
 #include <memory>
+#include <string_view>
 #include <vector>
 #include <iomanip>
 #include <string>
+#include <format>
 
 #include "signal_processor.h"
 #include "median_filter.h"
@@ -236,48 +238,26 @@ void showMenu() {
     std::cout << "Ваш выбор: ";
 }
 
-int main() {
-    printHeader();
+int main(int argc, char* argv[]) {
+    const auto& cleanSignal = SignalGenerator::loadSignalFromCSV(
+        std::format("{}/data/clean/{}", ROOT_PATH, argv[1])
+    );
 
-    int choice;
-    do {
-        showMenu();
-        std::cin >> choice;
-        std::cout << "\n";
+    const auto& noisySignal = SignalGenerator::loadSignalFromCSV(
+        std::format("{}/data/noisy/{}", ROOT_PATH, argv[1])
+    );
 
-        try {
-            switch (choice) {
-                case 1:
-                    demonstrateAlgorithms();
-                    break;
-                case 2:
-                    demonstrateBasicSignals();
-                    break;
-                case 3:
-                    runFullBenchmark();
-                    break;
-                case 4:
-                    runScalabilityTest();
-                    break;
-                case 5:
-                    std::cout << "Программа завершена.\n";
-                    break;
-                default:
-                    std::cout << "Неверный выбор. Попробуйте снова.\n";
-                    break;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Ошибка: " << e.what() << std::endl;
-        }
+    for (int i = 1; i < 100; i += 2) {
+        MedianFilter algorithm(i);
+        const auto& filteredSignal = algorithm.process(noisySignal);
 
-        if (choice != 5) {
-            std::cout << "\nНажмите Enter для продолжения...";
-            std::cin.ignore();
-            std::cin.get();
-            std::cout << "\n";
-        }
+        double snr = calculateSNR(cleanSignal, filteredSignal);
+        double mse = calculateMSE(cleanSignal, filteredSignal);
+        double correlation = calculateCorrelation(cleanSignal, filteredSignal);
 
-    } while (choice != 5);
-
-    return 0;
+        std::cout << "  SNR: " << std::fixed << std::setprecision(2) << snr << " дБ\n";
+        std::cout << "  MSE: " << std::scientific << std::setprecision(2) << mse << "\n";
+        std::cout << "  Корреляция: " << std::fixed << std::setprecision(3) << correlation << "\n";
+        // std::cout << "  Время: " << executionTime << " мкс\n\n";
+    }
 }
