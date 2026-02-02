@@ -7,6 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Поиск необходимых пакетов
 find_package(Threads REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(glfw3 REQUIRED)
+find_package(GLEW REQUIRED)
 
 # Определить корневой путь проекта
 get_filename_component(ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
@@ -48,11 +51,25 @@ target_link_libraries(echo_filter_test echo_filters Threads::Threads)
 add_executable(generate_test_data src/generate_data.cpp)
 target_link_libraries(generate_test_data echo_filters)
 
+# GUI программа для визуализации фильтров
+set(GUI_SOURCES
+    view/main_gui.cpp
+    view/signal_visualizer.cpp
+)
+
+set(GUI_HEADERS
+    view/signal_visualizer.h
+)
+
+add_executable(signal_filter_gui ${GUI_SOURCES} ${GUI_HEADERS})
+target_link_libraries(signal_filter_gui echo_filters Threads::Threads OpenGL::GL glfw GLEW::GLEW)
+
 # Компиляционные флаги для оптимизации
 target_compile_options(echo_filters PRIVATE -O2 -Wall -Wextra)
 target_compile_options(echo_filter_test PRIVATE -O2 -Wall -Wextra)
 target_compile_options(generate_test_data PRIVATE -O2 -Wall -Wextra)
+target_compile_options(signal_filter_gui PRIVATE -O2 -Wall -Wextra)
 
 # Установка целей
-install(TARGETS echo_filter_test generate_test_data
+install(TARGETS echo_filter_test generate_test_data signal_filter_gui
         RUNTIME DESTINATION bin)
