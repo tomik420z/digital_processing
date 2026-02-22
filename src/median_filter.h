@@ -50,7 +50,7 @@ private:
      */
     double computeWindowMedian(const Signal& input, size_t index) const;
 
-    bool IsValidWindowSize(size_t windowSize) const;
+    static bool IsValidWindowSize(size_t windowSize);
 };
 
 #endif // MEDIAN_FILTER_H

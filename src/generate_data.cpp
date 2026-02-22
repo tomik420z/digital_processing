@@ -10,10 +10,17 @@ void printUsage(const char* programName) {
     std::cout << "  -n, --num-signals N  Количество сигналов для генерации (по умолчанию: 10)\n";
     std::cout << "  -l, --length L       Длина каждого сигнала (по умолчанию: 1000)\n";
     std::cout << "  -s, --seed S         Начальное значение для генератора (по умолчанию: 42)\n";
+    std::cout << "  -f, --frequency F    Масштаб частоты сигналов (по умолчанию: 0.05)\n";
     std::cout << "  -o, --output DIR     Выходная директория (по умолчанию: data)\n";
     std::cout << "\n";
-    std::cout << "Пример:\n";
+    std::cout << "Примечания:\n";
+    std::cout << "  Масштаб частоты: 1.0 = исходная частота, 0.05 = в 20 раз меньше\n";
+    std::cout << "  Меньшая частота лучше подходит для тестирования фильтров\n";
+    std::cout << "\n";
+    std::cout << "Примеры:\n";
     std::cout << "  " << programName << " -n 50 -l 2000 -o test_data\n";
+    std::cout << "  " << programName << " -f 0.1 -n 20     # удвоенная частота\n";
+    std::cout << "  " << programName << " -f 0.025 -n 20   # половинная частота\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -21,6 +28,7 @@ int main(int argc, char* argv[]) {
     size_t numSignals = 10;
     size_t signalLength = 1000;
     unsigned int seed = 42;
+    double frequencyScale = 0.05; // В 20 раз меньше исходной частоты
     std::string outputDir = "data";
 
     // Парсинг аргументов командной строки
@@ -55,6 +63,18 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         }
+        else if (arg == "-f" || arg == "--frequency") {
+            if (i + 1 < argc) {
+                frequencyScale = std::stod(argv[++i]);
+                if (frequencyScale <= 0.0 || frequencyScale > 1.0) {
+                    std::cerr << "Ошибка: масштаб частоты должен быть в диапазоне (0.0, 1.0]" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Ошибка: не указан масштаб частоты для " << arg << std::endl;
+                return 1;
+            }
+        }
         else if (arg == "-o" || arg == "--output") {
             if (i + 1 < argc) {
                 outputDir = argv[++i];
@@ -78,6 +98,13 @@ int main(int argc, char* argv[]) {
     std::cout << "  Количество сигналов: " << numSignals << "\n";
     std::cout << "  Длина сигналов: " << signalLength << " отсчетов\n";
     std::cout << "  Начальное значение: " << seed << "\n";
+    std::cout << "  Масштаб частоты: " << frequencyScale;
+    if (frequencyScale == 0.05) {
+        std::cout << " (в 20 раз меньше)";
+    } else if (frequencyScale == 1.0) {
+        std::cout << " (исходная)";
+    }
+    std::cout << "\n";
     std::cout << "  Выходная директория: " << outputDir << "\n\n";
 
     try {
@@ -85,7 +112,7 @@ int main(int argc, char* argv[]) {
         SignalGenerator generator(seed);
 
         std::cout << "Генерация тестового набора данных...\n";
-        auto dataset = generator.generateTestDataset(signalLength, numSignals);
+        auto dataset = generator.generateTestDataset(signalLength, numSignals, frequencyScale);
 
         std::cout << "Сгенерировано " << dataset.size() << " пар сигналов\n";
 

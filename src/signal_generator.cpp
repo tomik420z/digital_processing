@@ -160,7 +160,7 @@ SignalProcessor::Signal SignalGenerator::generateWhiteNoise(size_t length, doubl
 }
 
 std::vector<std::pair<SignalProcessor::Signal, SignalProcessor::Signal>>
-SignalGenerator::generateTestDataset(size_t signalLength, size_t numSignals) const {
+SignalGenerator::generateTestDataset(size_t signalLength, size_t numSignals, double frequencyScale) const {
 
     std::vector<std::pair<Signal, Signal>> dataset;
     dataset.reserve(numSignals);
@@ -197,7 +197,9 @@ SignalGenerator::generateTestDataset(size_t signalLength, size_t numSignals) con
             // Основные сигналы
             SignalType signalType = signalTypes[(i / 2) % signalTypes.size()];
             double amplitude = 0.5 + 0.5 * uniform(rng_);
-            double frequency = 0.05 + 0.15 * uniform(rng_); // Частота от 0.05 до 0.2
+            // Применяем масштабирование частоты (по умолчанию в 20 раз меньше)
+            double baseFreq = 0.05 + 0.15 * uniform(rng_); // Базовая частота от 0.05 до 0.2
+            double frequency = baseFreq * frequencyScale;
             double phase = 2.0 * M_PI * uniform(rng_);
             double dutyCycle = 0.3 + 0.4 * uniform(rng_); // Для квадратного сигнала
 

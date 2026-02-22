@@ -5,6 +5,7 @@
 #include <string>
 #include <chrono>
 
+
 /**
  * Базовый класс для обработки сигналов
  */
@@ -37,13 +38,6 @@ public:
     std::pair<Signal, long long> measurePerformance(const Signal& input);
 
 protected:
-    /**
-     * Вычислить медиану вектора значений
-     * @param values Вектор значений
-     * @return Медиана
-     */
-    static double median(std::vector<double> values);
-
     /**
      * Вычислить медианное абсолютное отклонение
      * @param values Вектор значений

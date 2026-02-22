@@ -1,0 +1,76 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Main Application",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/echo_filter_test",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Debug Build",
+            "miDebuggerPath": "/usr/bin/lldb-mi"
+        },
+        {
+            "name": "Debug GUI Application",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/signal_filter_gui",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Debug Build",
+            "miDebuggerPath": "/usr/bin/lldb-mi"
+        },
+        {
+            "name": "Debug Data Generator",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/generate_test_data",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Debug Build",
+            "miDebuggerPath": "/usr/bin/lldb-mi"
+        },
+        {
+            "name": "Attach to Process",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/build/digital_processing",
+            "MIMode": "lldb",
+            "miDebuggerPath": "/usr/bin/lldb-mi"
+        }
+    ]
+}

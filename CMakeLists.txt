@@ -39,6 +39,7 @@ set(FILTER_HEADERS
     src/savgol_filter.h
     src/signal_generator.h
     src/performance_tester.h
+    src/utils/median.h
 )
 
 add_library(echo_filters STATIC ${FILTER_SOURCES} ${FILTER_HEADERS})

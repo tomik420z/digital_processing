@@ -1,4 +1,6 @@
 #include "outlier_detection.h"
+#include "utils/median.h"
+
 #include <algorithm>
 #include <numeric>
 #include <cmath>
@@ -262,7 +264,7 @@ SignalProcessor::Signal OutlierDetection::interpolateAutoregressive(const Signal
         if (outliers[i]) {
             double sum = 0.0;
             double weightSum = 0.0;
-            size_t usedPoints = 0;
+            size_t usedPoints = 0ull;
 
             // Используем предыдущие нормальные точки
             for (size_t j = 1; j <= arOrder_ && j <= i; ++j) {
@@ -271,7 +273,7 @@ SignalProcessor::Signal OutlierDetection::interpolateAutoregressive(const Signal
                     double weight = 1.0 / j; // Обратно пропорциональный вес
                     sum += weight * result[idx];
                     weightSum += weight;
-                    usedPoints++;
+                    ++usedPoints;
                 }
             }
 

@@ -126,10 +126,12 @@ public:
      * Генерировать тестовый набор данных
      * @param signalLength Длина сигналов
      * @param numSignals Количество различных типов сигналов
+     * @param frequencyScale Масштаб частоты (1.0 = по умолчанию, 0.05 = в 20 раз меньше)
      * @return Набор тестовых сигналов (clean, noisy)
      */
     std::vector<std::pair<Signal, Signal>> generateTestDataset(size_t signalLength = 1000,
-                                                               size_t numSignals = 10) const;
+                                                               size_t numSignals = 10,
+                                                               double frequencyScale = 0.05) const;
 
     /**
      * Сохранить сигнал в CSV файл

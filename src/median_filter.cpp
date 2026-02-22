@@ -1,5 +1,8 @@
 #include "median_filter.h"
+#include "utils/median.h"
+
 #include <algorithm>
+#include <deque>
 #include <stdexcept>
 
 MedianFilter::MedianFilter(size_t windowSize) {
@@ -37,7 +40,7 @@ size_t MedianFilter::getWindowSize() const {
 }
 
 double MedianFilter::computeWindowMedian(const Signal& input, size_t index) const {
-    std::vector<double> window;
+    std::deque<Signal::value_type> window;
     size_t halfWindow = windowSize_ / 2;
 
     // Определяем границы окна с учетом краев сигнала
@@ -54,7 +57,7 @@ double MedianFilter::computeWindowMedian(const Signal& input, size_t index) cons
         // Дополняем начало
         size_t padding = halfWindow - index;
         for (size_t i = 0; i < padding; ++i) {
-            window.insert(window.begin(), input[0]);
+            window.push_front(input[0]);
         }
     }
 
@@ -69,6 +72,6 @@ double MedianFilter::computeWindowMedian(const Signal& input, size_t index) cons
     return median(window);
 }
 
-bool MedianFilter::IsValidWindowSize(size_t windowSize) const {
+bool MedianFilter::IsValidWindowSize(size_t windowSize) {
     return windowSize != 0 && windowSize % 2 != 0;
 }

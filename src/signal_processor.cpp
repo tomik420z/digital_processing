@@ -1,4 +1,6 @@
 #include "signal_processor.h"
+#include "utils/median.h"
+
 #include <algorithm>
 #include <numeric>
 #include <cmath>
@@ -12,21 +14,6 @@ std::pair<SignalProcessor::Signal, long long> SignalProcessor::measurePerformanc
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     return std::make_pair(result, duration.count());
-}
-
-double SignalProcessor::median(std::vector<double> values) {
-    if (values.empty()) {
-        return 0.0;
-    }
-
-    std::sort(values.begin(), values.end());
-    size_t size = values.size();
-
-    if (size % 2 == 0) {
-        return (values[size/2 - 1] + values[size/2]) / 2.0;
-    } else {
-        return values[size/2];
-    }
 }
 
 double SignalProcessor::mad(const std::vector<double>& values, double med) {
