@@ -12,6 +12,7 @@
 #include "morphological_filter.h"
 #include "outlier_detection.h"
 #include "savgol_filter.h"
+#include "kalman_filter.h"
 #include "signal_generator.h"
 #include "performance_tester.h"
 
@@ -52,6 +53,7 @@ void demonstrateAlgorithms() {
     filters.push_back(std::make_unique<OutlierDetection>(
         OutlierDetection::DetectionMethod::MAD_BASED,
         OutlierDetection::InterpolationMethod::LINEAR, 3.0, 11));
+    filters.push_back(std::make_unique<KalmanFilter>(0.1, 1.0, 1.0));
 
     // Применяем каждый алгоритм и выводим результаты
     for (auto& filter : filters) {
@@ -239,12 +241,15 @@ void showMenu() {
 }
 
 int main(int argc, char* argv[]) {
+    // Используем имя файла по умолчанию или из аргументов командной строки
+    std::string filename = (argc > 1) ? argv[1] : "signal_0.csv";
+
     const auto& cleanSignal = SignalGenerator::loadSignalFromCSV(
-        std::format("{}/data/clean/{}", ROOT_PATH, argv[1])
+        std::format("{}/data/clean/{}", ROOT_PATH, filename)
     );
 
     const auto& noisySignal = SignalGenerator::loadSignalFromCSV(
-        std::format("{}/data/noisy/{}", ROOT_PATH, argv[1])
+        std::format("{}/data/noisy/{}", ROOT_PATH, filename)
     );
 
     for (int i = 1; i < 100; i += 2) {

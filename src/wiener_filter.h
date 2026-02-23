@@ -8,9 +8,9 @@
  */
 class WienerFilter : public SignalProcessor {
 private:
-    size_t filterOrder_;        // Порядок фильтра
-    double mu_;                 // Шаг адаптации
-    double lambda_;             // Коэффициент забывания
+    size_t filterOrder_;          // Порядок фильтра
+    double mu_;                   // Шаг адаптации
+    double lambda_;               // Коэффициент забывания
     std::vector<double> weights_; // Веса фильтра
 
 public:

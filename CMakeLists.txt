@@ -26,8 +26,10 @@ set(FILTER_SOURCES
     src/morphological_filter.cpp
     src/outlier_detection.cpp
     src/savgol_filter.cpp
+    src/kalman_filter.cpp
     src/signal_generator.cpp
     src/performance_tester.cpp
+    src/utils/matrix2x2.cpp
 )
 
 set(FILTER_HEADERS
@@ -37,9 +39,11 @@ set(FILTER_HEADERS
     src/morphological_filter.h
     src/outlier_detection.h
     src/savgol_filter.h
+    src/kalman_filter.h
     src/signal_generator.h
     src/performance_tester.h
     src/utils/median.h
+    src/utils/matrix2x2.h
 )
 
 add_library(echo_filters STATIC ${FILTER_SOURCES} ${FILTER_HEADERS})
@@ -70,6 +74,14 @@ target_compile_options(echo_filters PRIVATE -O2 -Wall -Wextra)
 target_compile_options(echo_filter_test PRIVATE -O2 -Wall -Wextra)
 target_compile_options(generate_test_data PRIVATE -O2 -Wall -Wextra)
 target_compile_options(signal_filter_gui PRIVATE -O2 -Wall -Wextra)
+
+# Тест для Matrix2x2
+add_executable(test_matrix2x2 tests/test_matrix2x2.cpp)
+target_link_libraries(test_matrix2x2 echo_filters)
+
+# Тест для KalmanFilter
+add_executable(test_kalman tests/test_kalman.cpp)
+target_link_libraries(test_kalman echo_filters)
 
 # Установка целей
 install(TARGETS echo_filter_test generate_test_data signal_filter_gui
