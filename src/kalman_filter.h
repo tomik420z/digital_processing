@@ -2,8 +2,12 @@
 #define KALMAN_FILTER_H
 
 #include "signal_processor.h"
-#include "utils/matrix2x2.h"
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/io.hpp>
 #include <vector>
+
+namespace ublas = boost::numeric::ublas;
 
 /**
  * Фильтр Калмана для сглаживания одномерных сигналов
@@ -78,15 +82,15 @@ private:
     double deltaT_;           // Временной интервал
 
     // Состояние фильтра
-    Vector2D x_;         // Вектор состояния [позиция, скорость]
-    Matrix2x2 P_;        // Ковариационная матрица ошибки (2x2)
+    ublas::vector<double> x_;         // Вектор состояния [позиция, скорость]
+    ublas::matrix<double> P_;         // Ковариационная матрица ошибки (2x2)
 
     // Матрицы модели
-    Matrix2x2 F_;        // Матрица перехода состояния (2x2)
-    Vector2D H_;         // Матрица наблюдения (1x2)
-    Matrix2x2 Q_;        // Ковариационная матрица шума процесса (2x2)
+    ublas::matrix<double> F_;         // Матрица перехода состояния (2x2)
+    ublas::vector<double> H_;         // Матрица наблюдения (1x2)
+    ublas::matrix<double> Q_;         // Ковариационная матрица шума процесса (2x2)
 
-    bool initialized_;   // Флаг инициализации
+    bool initialized_;                // Флаг инициализации
 
     /**
      * Инициализировать матрицы модели
@@ -104,63 +108,6 @@ private:
      */
     void update(double measurement);
 
-    /**
-     * Умножение матрицы на вектор
-     * @param matrix Матрица (2x2)
-     * @param vector Вектор (2x1)
-     * @return Результирующий вектор (2x1)
-     */
-    std::vector<double> matrixVectorMultiply(const std::vector<std::vector<double>>& matrix,
-                                           const std::vector<double>& vector) const;
-
-    /**
-     * Умножение матриц
-     * @param A Первая матрица (2x2)
-     * @param B Вторая матрица (2x2)
-     * @return Результирующая матрица (2x2)
-     */
-    std::vector<std::vector<double>> matrixMultiply(const std::vector<std::vector<double>>& A,
-                                                   const std::vector<std::vector<double>>& B) const;
-
-    /**
-     * Транспонирование матрицы
-     * @param matrix Входная матрица (2x2)
-     * @return Транспонированная матрица (2x2)
-     */
-    std::vector<std::vector<double>> matrixTranspose(const std::vector<std::vector<double>>& matrix) const;
-
-    /**
-     * Сложение матриц
-     * @param A Первая матрица (2x2)
-     * @param B Вторая матрица (2x2)
-     * @return Результирующая матрица (2x2)
-     */
-    std::vector<std::vector<double>> matrixAdd(const std::vector<std::vector<double>>& A,
-                                              const std::vector<std::vector<double>>& B) const;
-
-    /**
-     * Вычитание матриц
-     * @param A Первая матрица (2x2)
-     * @param B Вторая матрица (2x2)
-     * @return Результирующая матрица (2x2)
-     */
-    std::vector<std::vector<double>> matrixSubtract(const std::vector<std::vector<double>>& A,
-                                                   const std::vector<std::vector<double>>& B) const;
-
-    /**
-     * Скалярное произведение векторов
-     * @param a Первый вектор
-     * @param b Второй вектор
-     * @return Скалярное произведение
-     */
-    double dotProduct(const std::vector<double>& a, const std::vector<double>& b) const;
-
-    /**
-     * Обращение матрицы 2x2
-     * @param matrix Матрица для обращения
-     * @return Обращенная матрица
-     */
-    std::vector<std::vector<double>> matrixInverse2x2(const std::vector<std::vector<double>>& matrix) const;
 };
 
 #endif // KALMAN_FILTER_H

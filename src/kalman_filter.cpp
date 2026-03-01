@@ -1,6 +1,9 @@
 #include "kalman_filter.h"
+#include <boost/numeric/ublas/lu.hpp>
 #include <stdexcept>
 #include <cmath>
+
+using namespace boost::numeric::ublas;
 
 KalmanFilter::KalmanFilter(double processNoise, double measurementNoise, double deltaT)
     : processNoise_(processNoise),
@@ -17,6 +20,13 @@ KalmanFilter::KalmanFilter(double processNoise, double measurementNoise, double 
     if (deltaT <= 0.0) {
         throw std::invalid_argument("Time delta must be positive");
     }
+
+    // Инициализация векторов и матриц с правильными размерами
+    x_.resize(2);
+    P_.resize(2, 2);
+    F_.resize(2, 2);
+    H_.resize(2);
+    Q_.resize(2, 2);
 
     initializeMatrices();
     reset();
@@ -36,10 +46,11 @@ SignalProcessor::Signal KalmanFilter::process(const Signal& input) {
     for (size_t i = 0; i < input.size(); ++i) {
         if (!initialized_) {
             // Инициализация состояния первым измерением
-            x_ = Vector2D(input[i], 0.0);  // [позиция, скорость]
+            x_(0) = input[i];  // позиция
+            x_(1) = 0.0;       // скорость
 
             // Инициализация ковариационной матрицы
-            P_ = Matrix2x2::identity();
+            P_ = identity_matrix<double>(2);
 
             initialized_ = true;
             output.push_back(input[i]);
@@ -51,7 +62,7 @@ SignalProcessor::Signal KalmanFilter::process(const Signal& input) {
             update(input[i]);
 
             // Выходное значение - позиция (первый элемент вектора состояния)
-            output.push_back(x_.x());
+            output.push_back(x_(0));
         }
     }
 
@@ -88,14 +99,15 @@ void KalmanFilter::reset() {
     initialized_ = false;
 
     // Сброс вектора состояния
-    x_ = Vector2D(0.0, 0.0);
+    x_(0) = 0.0;
+    x_(1) = 0.0;
 
     // Сброс ковариационной матрицы
-    P_ = Matrix2x2::identity();
+    P_ = identity_matrix<double>(2);
 }
 
 std::vector<double> KalmanFilter::getState() const {
-    return x_.toVector();
+    return {x_(0), x_(1)};
 }
 
 std::vector<double> KalmanFilter::getCovariance() const {
@@ -106,12 +118,16 @@ void KalmanFilter::initializeMatrices() {
     // Матрица перехода состояния F (модель постоянной скорости)
     // x(k+1) = [1 dt] * [x(k)]   + w(k)
     //          [0  1]   [v(k)]
-    F_ = Matrix2x2(1.0, deltaT_, 0.0, 1.0);
+    F_(0,0) = 1.0;
+    F_(0,1) = deltaT_;
+    F_(1,0) = 0.0;
+    F_(1,1) = 1.0;
 
     // Матрица наблюдения H (измеряем только позицию)
     // z(k) = [1 0] * [x(k)] + v(k)
     //                 [v(k)]
-    H_ = Vector2D(1.0, 0.0);
+    H_(0) = 1.0;
+    H_(1) = 0.0;
 
     // Ковариационная матрица шума процесса Q
     // Используем модель белого шума ускорения
@@ -119,33 +135,28 @@ void KalmanFilter::initializeMatrices() {
     double dt3 = dt2 * deltaT_;
     double dt4 = dt3 * deltaT_;
 
-    Q_ = Matrix2x2(
-        processNoise_ * dt4 / 4.0,  // дисперсия позиции
-        processNoise_ * dt3 / 2.0,  // ковариация позиция-скорость
-        processNoise_ * dt3 / 2.0,  // ковариация скорость-позиция
-        processNoise_ * dt2         // дисперсия скорости
-    );
+    Q_(0,0) = processNoise_ * dt4 / 4.0;  // дисперсия позиции
+    Q_(0,1) = processNoise_ * dt3 / 2.0;  // ковариация позиция-скорость
+    Q_(1,0) = processNoise_ * dt3 / 2.0;  // ковариация скорость-позиция
+    Q_(1,1) = processNoise_ * dt2;        // дисперсия скорости
 }
 
 void KalmanFilter::predict() {
     // Предсказание состояния: x_pred = F * x
-    Vector2D x_pred = Vector2D(F_ * x_.toVector());
+    x_ = prod(F_, x_);
 
     // Предсказание ковариационной матрицы: P_pred = F * P * F^T + Q
-    Matrix2x2 P_pred = F_ * P_ * F_.transpose() + Q_;
-
-    // Обновляем состояние
-    x_ = x_pred;
-    P_ = P_pred;
+    matrix<double> F_T = trans(F_);
+    P_ = prod(matrix<double>(prod(F_, P_)), F_T) + Q_;
 }
 
 void KalmanFilter::update(double measurement) {
     // Невязка: y = z - H * x
-    double innovation = measurement - H_.dot(x_);
+    double innovation = measurement - inner_prod(H_, x_);
 
     // Ковариация невязки: S = H * P * H^T + R
-    std::vector<double> H_P = P_ * H_.toVector();
-    double S = H_.dot(Vector2D(H_P)) + measurementNoise_;
+    vector<double> H_P = prod(H_, P_);
+    double S = inner_prod(H_, H_P) + measurementNoise_;
 
     if (std::abs(S) < 1e-12) {
         // Избегаем деления на ноль
@@ -153,66 +164,16 @@ void KalmanFilter::update(double measurement) {
     }
 
     // Коэффициент усиления Калмана: K = P * H^T / S
-    std::vector<double> P_H = P_ * H_.toVector();
-    Vector2D K = Vector2D(P_H) * (1.0 / S);
+    vector<double> P_H = prod(P_, H_);
+    vector<double> K = P_H / S;
 
     // Коррекция состояния: x = x + K * y
-    x_ = x_ + K * innovation;
+    x_ += K * innovation;
 
     // Обновление ковариационной матрицы: P = (I - K * H) * P
-    Matrix2x2 I_KH = Matrix2x2::identity() -
-                     Matrix2x2(K[0] * H_[0], K[0] * H_[1],
-                              K[1] * H_[0], K[1] * H_[1]);
+    matrix<double> I = identity_matrix<double>(2);
+    matrix<double> K_outer_H = outer_prod(K, H_);
+    matrix<double> I_KH = I - K_outer_H;
 
-    P_ = I_KH * P_;
-}
-
-std::vector<double> KalmanFilter::matrixVectorMultiply(const std::vector<std::vector<double>>& matrix,
-                                                      const std::vector<double>& vector) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 m(matrix);
-    return m * vector;
-}
-
-std::vector<std::vector<double>> KalmanFilter::matrixMultiply(const std::vector<std::vector<double>>& A,
-                                                             const std::vector<std::vector<double>>& B) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 matA(A);
-    Matrix2x2 matB(B);
-    return (matA * matB).toVector();
-}
-
-std::vector<std::vector<double>> KalmanFilter::matrixTranspose(const std::vector<std::vector<double>>& matrix) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 m(matrix);
-    return m.transpose().toVector();
-}
-
-std::vector<std::vector<double>> KalmanFilter::matrixAdd(const std::vector<std::vector<double>>& A,
-                                                        const std::vector<std::vector<double>>& B) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 matA(A);
-    Matrix2x2 matB(B);
-    return (matA + matB).toVector();
-}
-
-std::vector<std::vector<double>> KalmanFilter::matrixSubtract(const std::vector<std::vector<double>>& A,
-                                                             const std::vector<std::vector<double>>& B) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 matA(A);
-    Matrix2x2 matB(B);
-    return (matA - matB).toVector();
-}
-
-double KalmanFilter::dotProduct(const std::vector<double>& a, const std::vector<double>& b) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Vector2D vecA(a);
-    Vector2D vecB(b);
-    return vecA.dot(vecB);
-}
-
-std::vector<std::vector<double>> KalmanFilter::matrixInverse2x2(const std::vector<std::vector<double>>& matrix) const {
-    // Этот метод больше не используется, но оставляем для совместимости
-    Matrix2x2 m(matrix);
-    return m.inverse().toVector();
+    P_ = prod(I_KH, P_);
 }

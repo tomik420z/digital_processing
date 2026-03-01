@@ -10,6 +10,8 @@ find_package(Threads REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(GLEW REQUIRED)
+find_package(Boost REQUIRED COMPONENTS headers)
+find_package(GTest REQUIRED)
 
 # Определить корневой путь проекта
 get_filename_component(ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
@@ -29,7 +31,6 @@ set(FILTER_SOURCES
     src/kalman_filter.cpp
     src/signal_generator.cpp
     src/performance_tester.cpp
-    src/utils/matrix2x2.cpp
 )
 
 set(FILTER_HEADERS
@@ -43,10 +44,10 @@ set(FILTER_HEADERS
     src/signal_generator.h
     src/performance_tester.h
     src/utils/median.h
-    src/utils/matrix2x2.h
 )
 
 add_library(echo_filters STATIC ${FILTER_SOURCES} ${FILTER_HEADERS})
+target_link_libraries(echo_filters PUBLIC Boost::headers)
 
 # Основная программа тестирования
 add_executable(echo_filter_test src/main.cpp)
@@ -75,13 +76,9 @@ target_compile_options(echo_filter_test PRIVATE -O2 -Wall -Wextra)
 target_compile_options(generate_test_data PRIVATE -O2 -Wall -Wextra)
 target_compile_options(signal_filter_gui PRIVATE -O2 -Wall -Wextra)
 
-# Тест для Matrix2x2
-add_executable(test_matrix2x2 tests/test_matrix2x2.cpp)
-target_link_libraries(test_matrix2x2 echo_filters)
-
-# Тест для KalmanFilter
+# Тест для KalmanFilter (Google Test)
 add_executable(test_kalman tests/test_kalman.cpp)
-target_link_libraries(test_kalman echo_filters)
+target_link_libraries(test_kalman echo_filters GTest::gtest GTest::gtest_main)
 
 # Установка целей
 install(TARGETS echo_filter_test generate_test_data signal_filter_gui
