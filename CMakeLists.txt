@@ -31,6 +31,7 @@ set(FILTER_SOURCES
     src/kalman_filter.cpp
     src/signal_generator.cpp
     src/performance_tester.cpp
+    src/utils/linear_system_solver.cpp
 )
 
 set(FILTER_HEADERS
@@ -43,6 +44,7 @@ set(FILTER_HEADERS
     src/kalman_filter.h
     src/signal_generator.h
     src/performance_tester.h
+    src/utils/linear_system_solver.h
     src/utils/median.h
 )
 
@@ -80,6 +82,11 @@ target_compile_options(signal_filter_gui PRIVATE -O2 -Wall -Wextra)
 add_executable(test_kalman tests/test_kalman.cpp)
 target_link_libraries(test_kalman echo_filters GTest::gtest GTest::gtest_main)
 
+# Бенчмарк: одиночные фильтры vs двухэтапные цепочки (outlier → filter)
+add_executable(pipeline_benchmark src/pipeline_benchmark.cpp)
+target_link_libraries(pipeline_benchmark echo_filters Threads::Threads)
+target_compile_options(pipeline_benchmark PRIVATE -O2 -Wall -Wextra)
+
 # Установка целей
-install(TARGETS echo_filter_test generate_test_data signal_filter_gui
+install(TARGETS echo_filter_test generate_test_data signal_filter_gui pipeline_benchmark
         RUNTIME DESTINATION bin)

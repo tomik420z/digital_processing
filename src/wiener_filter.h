@@ -3,28 +3,45 @@
 
 #include "signal_processor.h"
 
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/lu.hpp>
+#include <boost/numeric/ublas/io.hpp>
+
+namespace ublas = boost::numeric::ublas;
+
 /**
- * Адаптивный фильтр Винера для подавления помех
+ * Фильтр Винера для подавления помех.
+ *
+ * Реализует классическое матричное решение:
+ *   w_opt = R⁻¹ · p
+ *
+ * где:
+ *   R — автокорреляционная матрица входного сигнала (M×M),
+ *       R[i,j] = (1/N) * Σ x[n-i] * x[n-j]
+ *   p — вектор взаимной корреляции между входным и желаемым сигналом (M),
+ *       p[i] = (1/N) * Σ d[n] * x[n-i]
+ *
+ * Желаемый сигнал d[n] оценивается как скользящее среднее входного
+ * (предположение: истинный сигнал — низкочастотный, помехи — высокочастотные).
+ *
+ * Матрица R инвертируется через LU-разложение (boost::numeric::ublas::lu_factorize).
  */
 class WienerFilter : public SignalProcessor {
-private:
-    size_t filterOrder_;          // Порядок фильтра
-    double mu_;                   // Шаг адаптации
-    double lambda_;               // Коэффициент забывания
-    std::vector<double> weights_; // Веса фильтра
-
 public:
     /**
      * Конструктор
-     * @param filterOrder Порядок фильтра
-     * @param mu Шаг адаптации (0 < mu < 1)
-     * @param lambda Коэффициент забывания (0 < lambda <= 1)
+     * @param filterOrder Порядок фильтра M (длина окна весов)
+     * @param desiredWindow Размер окна скользящего среднего для оценки d[n]
+     * @param regularization Коэффициент регуляризации (добавляется к диагонали R)
      */
-    WienerFilter(size_t filterOrder = 10, double mu = 0.01, double lambda = 0.99);
+    explicit WienerFilter(size_t filterOrder    = 10,
+                          size_t desiredWindow  = 5,
+                          double regularization = 1e-4);
 
     /**
-     * Применить фильтр Винера к сигналу
-     * @param input Входной сигнал
+     * Применить фильтр к сигналу
+     * @param input Входной (зашумлённый) сигнал
      * @return Отфильтрованный сигнал
      */
     Signal process(const Signal& input) override;
@@ -35,40 +52,44 @@ public:
     std::string getName() const override;
 
     /**
-     * Установить параметры фильтра
+     * Установить параметры
      * @param filterOrder Порядок фильтра
-     * @param mu Шаг адаптации
-     * @param lambda Коэффициент забывания
+     * @param desiredWindow Окно оценки желаемого сигнала
+     * @param regularization Коэффициент регуляризации
      */
-    void setParameters(size_t filterOrder, double mu, double lambda);
+    void setParameters(size_t filterOrder,
+                       size_t desiredWindow,
+                       double regularization = 1e-4);
 
     /**
-     * Сбросить состояние фильтра
+     * Получить вычисленные оптимальные веса w_opt (после вызова process)
      */
-    void reset();
+    std::vector<double> getWeights() const;
 
 private:
-    /**
-     * Адаптивная фильтрация методом RLS (Recursive Least Squares)
-     * @param input Входной сигнал
-     * @return Отфильтрованный сигнал
-     */
-    Signal processRLS(const Signal& input);
+    size_t filterOrder_;    ///< Порядок фильтра M
+    size_t desiredWindow_;  ///< Окно скользящего среднего для d[n]
+    double regularization_; ///< Тихоновская регуляризация (диагональное добавление к R)
+
+    ublas::vector<double> weights_; ///< Оптимальные веса w_opt после solve
 
     /**
-     * Адаптивная фильтрация методом LMS (Least Mean Squares)
-     * @param input Входной сигнал
-     * @return Отфильтрованный сигнал
+     * Построить матрицу R (автокорреляция входного сигнала)
+     * R[i,j] = (1/N) * Σ_{n=M-1}^{N-1} x[n-i] * x[n-j]
      */
-    Signal processLMS(const Signal& input);
+    ublas::matrix<double> buildCorrelationMatrix(const Signal& x) const;
 
     /**
-     * Создать вектор задержанных отсчетов
-     * @param input Входной сигнал
-     * @param index Текущий индекс
-     * @return Вектор задержанных отсчетов
+     * Построить вектор p (взаимная корреляция входного и желаемого)
+     * p[i] = (1/N) * Σ_{n=M-1}^{N-1} d[n] * x[n-i]
      */
-    std::vector<double> getDelayVector(const Signal& input, size_t index) const;
+    ublas::vector<double> buildCrossCorrelationVector(const Signal& x,
+                                                      const Signal& d) const;
+
+    /**
+     * Оценить желаемый сигнал d[n] как скользящее среднее x[n]
+     */
+    Signal estimateDesired(const Signal& x) const;
 };
 
 #endif // WIENER_FILTER_H

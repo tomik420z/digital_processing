@@ -252,17 +252,45 @@ int main(int argc, char* argv[]) {
         std::format("{}/data/noisy/{}", ROOT_PATH, filename)
     );
 
-    for (int i = 1; i < 100; i += 2) {
-        MedianFilter algorithm(i);
-        const auto& filteredSignal = algorithm.process(noisySignal);
+    std::cout << "=== Перебор параметров WienerFilter (w_opt = R⁻¹·p) ===\n";
+    std::cout << std::format("{:<40} {:>8} {:>14} {:>12}\n",
+        "Алгоритм", "SNR(дБ)", "MSE", "Корреляция");
+    std::cout << std::string(76, '-') << "\n";
 
-        double snr = calculateSNR(cleanSignal, filteredSignal);
-        double mse = calculateMSE(cleanSignal, filteredSignal);
-        double correlation = calculateCorrelation(cleanSignal, filteredSignal);
+    // Перебираем: filterOrder × desiredWindow × regularization
+    struct WParams { size_t order; size_t win; double reg; };
+    std::vector<WParams> grid = {
+        {4,  3, 1e-4}, {4,  5, 1e-4}, {4,  9, 1e-4},
+        {8,  3, 1e-4}, {8,  5, 1e-4}, {8,  9, 1e-4}, {8, 15, 1e-4},
+        {12, 5, 1e-4}, {12, 9, 1e-4}, {12,15, 1e-4},
+        {16, 5, 1e-4}, {16, 9, 1e-4}, {16,15, 1e-4}, {16,21, 1e-4},
+        {24, 9, 1e-4}, {24,15, 1e-4}, {24,21, 1e-4},
+        {32,15, 1e-4}, {32,21, 1e-4}, {32,31, 1e-4},
+        {8,  9, 1e-3}, {8,  9, 1e-5},
+        {16,15, 1e-3}, {16,15, 1e-5},
+    };
 
-        std::cout << "  SNR: " << std::fixed << std::setprecision(2) << snr << " дБ\n";
-        std::cout << "  MSE: " << std::scientific << std::setprecision(2) << mse << "\n";
-        std::cout << "  Корреляция: " << std::fixed << std::setprecision(3) << correlation << "\n";
-        // std::cout << "  Время: " << executionTime << " мкс\n\n";
+    double bestSNR = -1e9;
+    WParams bestP{};
+
+    for (const auto& p : grid) {
+        WienerFilter wf(p.order, p.win, p.reg);
+        const auto& filtered = wf.process(noisySignal);
+
+        double snr  = calculateSNR(cleanSignal, filtered);
+        double mse  = calculateMSE(cleanSignal, filtered);
+        double corr = calculateCorrelation(cleanSignal, filtered);
+
+        std::string label = std::format("ord={} win={} reg={:.0e}",
+            p.order, p.win, p.reg);
+
+        std::cout << std::format("{:<40} {:>8.2f} {:>14.3e} {:>12.4f}\n",
+            label, snr, mse, corr);
+
+        if (snr > bestSNR) { bestSNR = snr; bestP = p; }
     }
+
+    std::cout << std::string(76, '-') << "\n";
+    std::cout << std::format("Лучшие параметры: ord={} win={} reg={:.0e}  →  SNR={:.2f} дБ\n",
+        bestP.order, bestP.win, bestP.reg, bestSNR);
 }

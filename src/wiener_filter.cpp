@@ -1,188 +1,177 @@
 #include "wiener_filter.h"
-#include <algorithm>
-#include <numeric>
-#include <cmath>
+#include "utils/linear_system_solver.h"
+
 #include <stdexcept>
+#include <cmath>
+#include <algorithm>
 
-WienerFilter::WienerFilter(size_t filterOrder, double mu, double lambda)
-    : filterOrder_(filterOrder), mu_(mu), lambda_(lambda) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Конструктор / setParameters
+// ─────────────────────────────────────────────────────────────────────────────
 
-    if (filterOrder == 0) {
-        throw std::invalid_argument("Filter order must be positive");
-    }
-    if (mu <= 0.0 || mu >= 1.0) {
-        throw std::invalid_argument("Adaptation step mu must be in (0, 1)");
-    }
-    if (lambda <= 0.0 || lambda > 1.0) {
-        throw std::invalid_argument("Forgetting factor lambda must be in (0, 1]");
-    }
+WienerFilter::WienerFilter(size_t filterOrder,
+                           size_t desiredWindow,
+                           double regularization)
+    : filterOrder_(filterOrder),
+      desiredWindow_(desiredWindow),
+      regularization_(regularization)
+{
+    if (filterOrder_ == 0)
+        throw std::invalid_argument("WienerFilter: filterOrder must be > 0");
+    if (desiredWindow_ == 0)
+        throw std::invalid_argument("WienerFilter: desiredWindow must be > 0");
+    if (regularization_ < 0.0)
+        throw std::invalid_argument("WienerFilter: regularization must be >= 0");
 
-    reset();
+    weights_.resize(filterOrder_, 0.0);
 }
 
-SignalProcessor::Signal WienerFilter::process(const Signal& input) {
-    if (input.empty()) {
+void WienerFilter::setParameters(size_t filterOrder,
+                                  size_t desiredWindow,
+                                  double regularization)
+{
+    if (filterOrder == 0)
+        throw std::invalid_argument("WienerFilter: filterOrder must be > 0");
+    if (desiredWindow == 0)
+        throw std::invalid_argument("WienerFilter: desiredWindow must be > 0");
+    if (regularization < 0.0)
+        throw std::invalid_argument("WienerFilter: regularization must be >= 0");
+
+    filterOrder_    = filterOrder;
+    desiredWindow_  = desiredWindow;
+    regularization_ = regularization;
+    weights_.resize(filterOrder_, 0.0);
+}
+
+std::string WienerFilter::getName() const
+{
+    return "WienerFilter_ord" + std::to_string(filterOrder_) +
+           "_win" + std::to_string(desiredWindow_);
+}
+
+std::vector<double> WienerFilter::getWeights() const
+{
+    return std::vector<double>(weights_.begin(), weights_.end());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Основная точка входа
+// ─────────────────────────────────────────────────────────────────────────────
+
+SignalProcessor::Signal WienerFilter::process(const Signal& input)
+{
+    const size_t N = input.size();
+    if (N == 0)
         return Signal();
-    }
 
-    // Используем алгоритм LMS для адаптации
-    return processLMS(input);
-}
+    // 1. Оцениваем желаемый сигнал d[n] (скользящее среднее)
+    Signal d = estimateDesired(input);
 
-std::string WienerFilter::getName() const {
-    return "WienerFilter_" + std::to_string(filterOrder_) + "_" +
-           std::to_string(static_cast<int>(mu_ * 1000)) + "_" +
-           std::to_string(static_cast<int>(lambda_ * 1000));
-}
+    // 2. Строим автокорреляционную матрицу R и вектор p
+    ublas::matrix<double> R = buildCorrelationMatrix(input);
+    ublas::vector<double> p = buildCrossCorrelationVector(input, d);
 
-void WienerFilter::setParameters(size_t filterOrder, double mu, double lambda) {
-    if (filterOrder == 0) {
-        throw std::invalid_argument("Filter order must be positive");
-    }
-    if (mu <= 0.0 || mu >= 1.0) {
-        throw std::invalid_argument("Adaptation step mu must be in (0, 1)");
-    }
-    if (lambda <= 0.0 || lambda > 1.0) {
-        throw std::invalid_argument("Forgetting factor lambda must be in (0, 1]");
-    }
+    // 3. Добавляем тихоновскую регуляризацию к диагонали R
+    for (size_t i = 0; i < filterOrder_; ++i)
+        R(i, i) += regularization_;
 
-    filterOrder_ = filterOrder;
-    mu_ = mu;
-    lambda_ = lambda;
-    reset();
-}
+    // 4. Решаем R · w = p
+    weights_ = solveLinearSystem(R, p);
 
-void WienerFilter::reset() {
-    weights_.assign(filterOrder_, 0.0);
-    // Инициализация малыми случайными значениями
-    for (size_t i = 0; i < filterOrder_; ++i) {
-        weights_[i] = 0.001 * (static_cast<double>(rand()) / RAND_MAX - 0.5);
-    }
-}
-
-SignalProcessor::Signal WienerFilter::processLMS(const Signal& input) {
-    Signal output;
-    output.reserve(input.size());
-
-    // Буфер для задержанных отсчетов
-    std::vector<double> delayBuffer(filterOrder_, 0.0);
-
-    for (size_t n = 0; n < input.size(); ++n) {
-        // Сдвигаем буфер и добавляем новый отсчет
-        for (size_t i = filterOrder_ - 1; i > 0; --i) {
-            delayBuffer[i] = delayBuffer[i-1];
-        }
-        delayBuffer[0] = input[n];
-
-        // Вычисляем выход фильтра
+    // 5. Применяем фильтр: y[n] = wᵀ · x[n]
+    Signal output(N, 0.0);
+    for (size_t n = 0; n < N; ++n) {
         double y = 0.0;
         for (size_t i = 0; i < filterOrder_; ++i) {
-            y += weights_[i] * delayBuffer[i];
+            const size_t idx = (n >= i) ? (n - i) : 0;
+            y += weights_(i) * input[idx];
         }
-
-        // Оценка желаемого сигнала (предполагаем, что помехи имеют высокочастотную природу)
-        double desired = input[n];
-        if (n > 0) {
-            desired = 0.5 * (input[n-1] + (n < input.size()-1 ? input[n+1] : input[n]));
-        }
-
-        // Вычисляем ошибку
-        double error = desired - y;
-
-        // Обновляем веса (алгоритм LMS)
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            weights_[i] += mu_ * error * delayBuffer[i];
-        }
-
-        output.push_back(y);
+        output[n] = y;
     }
 
     return output;
 }
 
-SignalProcessor::Signal WienerFilter::processRLS(const Signal& input) {
-    Signal output;
-    output.reserve(input.size());
+// ─────────────────────────────────────────────────────────────────────────────
+// Построение матрицы R
+//   R[i,j] = (1/K) * Σ_{n=M-1}^{N-1} x[n-i] * x[n-j]
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Инициализация для RLS
-    const double delta = 0.001; // Параметр регуляризации
-    std::vector<std::vector<double>> P(filterOrder_, std::vector<double>(filterOrder_, 0.0));
+ublas::matrix<double>
+WienerFilter::buildCorrelationMatrix(const Signal& x) const
+{
+    const size_t N = x.size();
+    const size_t M = filterOrder_;
 
-    // Инициализация обратной корреляционной матрицы
-    for (size_t i = 0; i < filterOrder_; ++i) {
-        P[i][i] = 1.0 / delta;
+    ublas::matrix<double> R(M, M, 0.0);
+
+    // Суммируем по всем позициям, где доступны все M задержанных отсчётов
+    const size_t start = (N > M) ? (M - 1) : 0;
+    const size_t K     = (N > start) ? (N - start) : 1;
+
+    for (size_t n = start; n < N; ++n) {
+        for (size_t i = 0; i < M; ++i) {
+            for (size_t j = 0; j < M; ++j) {
+                R(i, j) += x[n - i] * x[n - j];
+            }
+        }
     }
 
-    std::vector<double> delayBuffer(filterOrder_, 0.0);
+    // Нормируем
+    for (size_t i = 0; i < M; ++i)
+        for (size_t j = 0; j < M; ++j)
+            R(i, j) /= static_cast<double>(K);
 
-    for (size_t n = 0; n < input.size(); ++n) {
-        // Обновляем буфер задержки
-        for (size_t i = filterOrder_ - 1; i > 0; --i) {
-            delayBuffer[i] = delayBuffer[i-1];
-        }
-        delayBuffer[0] = input[n];
-
-        // Вычисляем выход фильтра
-        double y = 0.0;
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            y += weights_[i] * delayBuffer[i];
-        }
-
-        // Желаемый сигнал (упрощенная оценка)
-        double desired = input[n];
-        if (n > 2 && n < input.size() - 2) {
-            desired = (input[n-2] + input[n-1] + input[n] + input[n+1] + input[n+2]) / 5.0;
-        }
-
-        double error = desired - y;
-
-        // Вычисляем коэффициент усиления Калмана
-        std::vector<double> k(filterOrder_, 0.0);
-        double denominator = lambda_;
-
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            for (size_t j = 0; j < filterOrder_; ++j) {
-                denominator += delayBuffer[i] * P[i][j] * delayBuffer[j];
-            }
-        }
-
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            for (size_t j = 0; j < filterOrder_; ++j) {
-                k[i] += P[i][j] * delayBuffer[j];
-            }
-            k[i] /= denominator;
-        }
-
-        // Обновляем веса
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            weights_[i] += k[i] * error;
-        }
-
-        // Обновляем обратную корреляционную матрицу
-        std::vector<std::vector<double>> P_new = P;
-        for (size_t i = 0; i < filterOrder_; ++i) {
-            for (size_t j = 0; j < filterOrder_; ++j) {
-                P_new[i][j] = (P[i][j] - k[i] * delayBuffer[j]) / lambda_;
-            }
-        }
-        P = P_new;
-
-        output.push_back(y);
-    }
-
-    return output;
+    return R;
 }
 
-std::vector<double> WienerFilter::getDelayVector(const Signal& input, size_t index) const {
-    std::vector<double> delayVector(filterOrder_, 0.0);
+// ─────────────────────────────────────────────────────────────────────────────
+// Построение вектора p
+//   p[i] = (1/K) * Σ_{n=M-1}^{N-1} d[n] * x[n-i]
+// ─────────────────────────────────────────────────────────────────────────────
 
-    for (size_t i = 0; i < filterOrder_; ++i) {
-        if (index >= i) {
-            delayVector[i] = input[index - i];
-        } else {
-            delayVector[i] = 0.0; // Нулевое дополнение для начала сигнала
+ublas::vector<double>
+WienerFilter::buildCrossCorrelationVector(const Signal& x,
+                                           const Signal& d) const
+{
+    const size_t N = x.size();
+    const size_t M = filterOrder_;
+
+    ublas::vector<double> p(M, 0.0);
+
+    const size_t start = (N > M) ? (M - 1) : 0;
+    const size_t K     = (N > start) ? (N - start) : 1;
+
+    for (size_t n = start; n < N; ++n) {
+        for (size_t i = 0; i < M; ++i) {
+            p(i) += d[n] * x[n - i];
         }
     }
 
-    return delayVector;
+    for (size_t i = 0; i < M; ++i)
+        p(i) /= static_cast<double>(K);
+
+    return p;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Оценка желаемого сигнала d[n] — скользящее среднее длиной desiredWindow_
+// ─────────────────────────────────────────────────────────────────────────────
+
+SignalProcessor::Signal WienerFilter::estimateDesired(const Signal& x) const
+{
+    const size_t N    = x.size();
+    const size_t half = desiredWindow_ / 2;
+    Signal d(N, 0.0);
+
+    for (size_t n = 0; n < N; ++n) {
+        const size_t lo  = (n >= half) ? (n - half) : 0;
+        const size_t hi  = std::min(n + half, N - 1);
+        double       sum = 0.0;
+        for (size_t k = lo; k <= hi; ++k)
+            sum += x[k];
+        d[n] = sum / static_cast<double>(hi - lo + 1);
+    }
+
+    return d;
 }
