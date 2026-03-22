@@ -2,6 +2,7 @@
 #include "../src/signal_generator.h"
 #include "../src/median_filter.h"
 #include "../src/wiener_filter.h"
+#include "../src/robust_wiener_filter.h"
 #include "../src/morphological_filter.h"
 #include "../src/outlier_detection.h"
 #include "../src/savgol_filter.h"
@@ -16,7 +17,7 @@
 void printUsage(const char* programName) {
     std::cout << "Использование: " << programName << " [опции]\n\n";
     std::cout << "Опции:\n";
-    std::cout << "  -f, --filter TYPE        Тип фильтра: median, wiener, morpho, outlier, savgol, kalman\n";
+    std::cout << "  -f, --filter TYPE        Тип фильтра: median, wiener, robust_wiener, morpho, outlier, savgol, kalman\n";
     std::cout << "  -i, --input FILE         Входной файл с зашумленным сигналом (.csv)\n";
     std::cout << "  -c, --clean FILE         Чистый сигнал для сравнения (.csv)\n";
     std::cout << "  -p, --params PARAMS      Параметры фильтра (зависят от типа)\n";
@@ -26,16 +27,20 @@ void printUsage(const char* programName) {
     std::cout << "Параметры фильтров:\n";
     std::cout << "  median:                  window_size (нечетное число, по умолчанию 7)\n";
     std::cout << "  wiener:                  order,desired_window,regularization (по умолчанию 8,5,1e-4)\n";
+    std::cout << "  robust_wiener:           order,desired_window,regularization,outlier_threshold,outlier_window\n";
+    std::cout << "                           (по умолчанию 10,5,1e-4,3.5,11)\n";
+    std::cout << "                           Улучшения: медианная оценка d[n], детекция импульсов, zero-padding\n";
     std::cout << "  morpho:                  operation,size (operation: opening/closing, по умолчанию opening,5)\n";
     std::cout << "  outlier:                 method,interpolation,threshold,window (по умолчанию mad,linear,3.0,11)\n";
     std::cout << "  savgol:                  window_size,poly_order (по умолчанию 11,3)\n";
     std::cout << "  kalman:                  process_noise,measurement_noise,delta_t (по умолчанию 0.1,1.0,1.0)\n\n";
 
     std::cout << "Примеры:\n";
-    std::cout << "  " << programName << " -f median  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
-    std::cout << "  " << programName << " -f wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 32,31,1e-4\n";
-    std::cout << "  " << programName << " -f wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 32,31,1e-4 --prefilter\n";
-    std::cout << "  " << programName << " -f kalman  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv --prefilter\n";
+    std::cout << "  " << programName << " -f median         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
+    std::cout << "  " << programName << " -f wiener         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 32,31,1e-4\n";
+    std::cout << "  " << programName << " -f robust_wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
+    std::cout << "  " << programName << " -f robust_wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 10,5,1e-4,3.5,11\n";
+    std::cout << "  " << programName << " -f kalman         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv --prefilter\n";
 }
 
 struct FilterParams {
@@ -126,6 +131,28 @@ std::unique_ptr<SignalProcessor> createFilter(const std::string& type, const std
             static_cast<size_t>(order),
             static_cast<size_t>(desiredWindow),
             regularization);
+    }
+    else if (type == "robust_wiener") {
+        int    order            = 10;
+        int    desiredWindow    = 5;
+        double regularization   = 1e-4;
+        double outlierThreshold = 3.5;
+        int    outlierWindow    = 11;
+
+        if (!params.empty()) {
+            auto parts = split(params, ',');
+            if (parts.size() >= 1) order            = std::stoi(parts[0]);
+            if (parts.size() >= 2) desiredWindow    = std::stoi(parts[1]);
+            if (parts.size() >= 3) regularization   = std::stod(parts[2]);
+            if (parts.size() >= 4) outlierThreshold = std::stod(parts[3]);
+            if (parts.size() >= 5) outlierWindow    = std::stoi(parts[4]);
+        }
+        return std::make_unique<RobustWienerFilter>(
+            static_cast<size_t>(order),
+            static_cast<size_t>(desiredWindow),
+            regularization,
+            outlierThreshold,
+            static_cast<size_t>(outlierWindow));
     }
     else if (type == "morpho") {
         MorphologicalFilter::Operation op = MorphologicalFilter::Operation::OPENING;

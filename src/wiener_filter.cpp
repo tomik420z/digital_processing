@@ -16,13 +16,15 @@ WienerFilter::WienerFilter(size_t filterOrder,
       desiredWindow_(desiredWindow),
       regularization_(regularization)
 {
-    if (filterOrder_ == 0)
+    if (filterOrder_ == 0) {
         throw std::invalid_argument("WienerFilter: filterOrder must be > 0");
-    if (desiredWindow_ == 0)
+    }
+    if (desiredWindow_ == 0) {
         throw std::invalid_argument("WienerFilter: desiredWindow must be > 0");
-    if (regularization_ < 0.0)
+    }
+    if (regularization_ < 0.0) {
         throw std::invalid_argument("WienerFilter: regularization must be >= 0");
-
+    }
     weights_.resize(filterOrder_, 0.0);
 }
 
@@ -72,8 +74,9 @@ SignalProcessor::Signal WienerFilter::process(const Signal& input)
     ublas::vector<double> p = buildCrossCorrelationVector(input, d);
 
     // 3. Добавляем тихоновскую регуляризацию к диагонали R
-    for (size_t i = 0; i < filterOrder_; ++i)
+    for (size_t i = 0; i < filterOrder_; ++i) {
         R(i, i) += regularization_;
+    }
 
     // 4. Решаем R · w = p
     weights_ = solveLinearSystem(R, p);
@@ -118,9 +121,11 @@ WienerFilter::buildCorrelationMatrix(const Signal& x) const
     }
 
     // Нормируем
-    for (size_t i = 0; i < M; ++i)
-        for (size_t j = 0; j < M; ++j)
+    for (size_t i = 0; i < M; ++i) {
+        for (size_t j = 0; j < M; ++j) {
             R(i, j) /= static_cast<double>(K);
+        }
+    }
 
     return R;
 }

@@ -25,6 +25,7 @@ set(FILTER_SOURCES
     src/signal_processor.cpp
     src/median_filter.cpp
     src/wiener_filter.cpp
+    src/robust_wiener_filter.cpp
     src/morphological_filter.cpp
     src/outlier_detection.cpp
     src/savgol_filter.cpp
@@ -38,6 +39,7 @@ set(FILTER_HEADERS
     src/signal_processor.h
     src/median_filter.h
     src/wiener_filter.h
+    src/robust_wiener_filter.h
     src/morphological_filter.h
     src/outlier_detection.h
     src/savgol_filter.h
