@@ -12,6 +12,24 @@
 namespace ublas = boost::numeric::ublas;
 
 /**
+ * Автоматически оцениваемые параметры робастного фильтра Винера.
+ * Заполняется методом RobustWienerFilter::estimateParameters(signal).
+ */
+struct WienerParams {
+    size_t filterOrder;       ///< Порядок FIR-фильтра M (по спектру: 1 / f_signal_95)
+    size_t desiredWindow;     ///< Окно скользящей медианы d[n]   (≈ filterOrder / 3)
+    double regularization;    ///< Тихоновская регуляризация λ     (≈ σ²_noise)
+    double outlierThreshold;  ///< Порог MAD-детектора выбросов    (по SNR-оценке)
+    size_t outlierWindow;     ///< Окно MAD-детектора              (≈ filterOrder * 2 + 1)
+
+    /// Диагностика: оценённые характеристики входного сигнала
+    double estimatedNoiseSigma;   ///< σ шума (MAD / 0.6745)
+    double estimatedSignalRMS;    ///< RMS сигнала
+    double estimatedSNR_dB;       ///< Приближённый SNR в дБ
+    double dominantFrequency;     ///< Доминирующая нормированная частота сигнала (0..0.5)
+};
+
+/**
  * Робастный фильтр Винера для подавления помех, включая несинхронные импульсы.
  *
  * Отличия от классического WienerFilter:
@@ -81,6 +99,33 @@ public:
      * Получить вычисленные оптимальные веса w_opt (после вызова process)
      */
     std::vector<double> getWeights() const;
+
+    /**
+     * Автоматически оценить параметры фильтра по входному сигналу.
+     *
+     * Комбинированный подход A+B:
+     *   — Вариант A (статистика): оценивает σ_noise через MAD, вычисляет
+     *     SNR и на его основе подбирает outlierThreshold и regularization.
+     *   — Вариант B (спектр): вычисляет FFT входного сигнала, находит
+     *     частоту, ниже которой сосредоточено 95% энергии сигнала (f_95),
+     *     и из неё выводит filterOrder = round(1 / (2·f_95)).
+     *
+     * Алгоритм:
+     *   1. Вычислить MAD(x) → σ_noise = MAD / 0.6745
+     *   2. Вычислить RMS(x) → SNR_dB = 20·log10(RMS / σ_noise)
+     *   3. outlierThreshold: 2.5 если SNR < 5 дБ, 3.5 если 5–15 дБ, 5.0 если > 15 дБ
+     *   4. regularization = σ_noise²  (масштабируется с уровнем шума)
+     *   5. Вычислить FFT(x), построить спектр мощности
+     *   6. Найти f_95 — частота, ниже которой 95% суммарной спектральной мощности
+     *   7. filterOrder = clamp(round(1 / (2·f_95)), 4, 128)
+     *   8. desiredWindow = clamp(filterOrder / 3, 3, 51)  (нечётное)
+     *   9. outlierWindow = clamp(filterOrder * 2 + 1, 7, 101) (нечётное)
+     *
+     * @param signal  Входной (зашумлённый) сигнал
+     * @return        Структура WienerParams с подобранными параметрами
+     *                и диагностическими полями
+     */
+    static WienerParams estimateParameters(const std::vector<double>& signal);
 
 private:
     size_t filterOrder_;      ///< Порядок фильтра M

@@ -399,6 +399,155 @@ SignalProcessor::Signal SignalGenerator::generateSawtoothSignal(size_t length, d
     return signal;
 }
 
+std::vector<std::pair<SignalProcessor::Signal, SignalProcessor::Signal>>
+SignalGenerator::generateWienerTestDataset(size_t signalLength,
+                                           double gaussianSNR_dB,
+                                           double impulseDensity,
+                                           double impulseAmplitude) const {
+    std::vector<std::pair<Signal, Signal>> dataset;
+    dataset.reserve(8);
+
+    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    std::normal_distribution<double>       gaussNorm(0.0, 1.0);
+
+    // Вспомогательная лямбда: RMS сигнала
+    auto rmsOf = [](const Signal& s) -> double {
+        double sum = 0.0;
+        for (double v : s) sum += v * v;
+        return std::sqrt(sum / static_cast<double>(s.size()));
+    };
+
+    // Вспомогательная лямбда: добавить гауссов белый шум с заданным SNR
+    auto addGaussian = [&](const Signal& clean) -> Signal {
+        double sigPow   = 0.0;
+        for (double v : clean) sigPow += v * v;
+        sigPow /= static_cast<double>(clean.size());
+        double snrLin   = std::pow(10.0, gaussianSNR_dB / 10.0);
+        double noiseSig = std::sqrt(sigPow / snrLin);
+        std::normal_distribution<double> dist(0.0, noiseSig);
+        Signal noisy = clean;
+        for (double& v : noisy) v += dist(rng_);
+        return noisy;
+    };
+
+    // Вспомогательная лямбда: добавить импульсные выбросы
+    auto addImpulses = [&](Signal noisy, double density, double ampScale) -> Signal {
+        double sigRms = rmsOf(noisy);
+        for (double& v : noisy) {
+            if (uniform(rng_) < density) {
+                double amp = (1.0 + uniform(rng_)) * ampScale * sigRms;
+                v += (gaussNorm(rng_) > 0.0 ? 1.0 : -1.0) * amp;
+            }
+        }
+        return noisy;
+    };
+
+    const size_t N = signalLength;
+    const double PI = M_PI;
+
+    // ── Сигнал 0: Медленный синус + гауссов белый шум ────────────────────────
+    // Истинный сигнал: A·sin(2π·f·n), f = 0.005 (очень медленный)
+    {
+        Signal clean(N);
+        const double f = 0.005, A = 1.0;
+        for (size_t n = 0; n < N; ++n)
+            clean[n] = A * std::sin(2.0 * PI * f * static_cast<double>(n));
+        dataset.emplace_back(clean, addGaussian(clean));
+    }
+
+    // ── Сигнал 1: Плавная экспоненциальная кривая + гауссов белый шум ────────
+    // s[n] = A·exp(-n / τ),  τ = N/3
+    {
+        Signal clean(N);
+        const double A = 1.0, tau = static_cast<double>(N) / 3.0;
+        for (size_t n = 0; n < N; ++n)
+            clean[n] = A * std::exp(-static_cast<double>(n) / tau);
+        dataset.emplace_back(clean, addGaussian(clean));
+    }
+
+    // ── Сигнал 2: Полиномиальный тренд (парабола) + гауссов белый шум ────────
+    // s[n] = 1 - 4·(n/N - 0.5)²   — куполообразная парабола в [0, 1]
+    {
+        Signal clean(N);
+        for (size_t n = 0; n < N; ++n) {
+            double t = static_cast<double>(n) / static_cast<double>(N);
+            clean[n] = 1.0 - 4.0 * (t - 0.5) * (t - 0.5);
+        }
+        dataset.emplace_back(clean, addGaussian(clean));
+    }
+
+    // ── Сигнал 3: Сумма трёх медленных синусов + гауссов белый шум ───────────
+    // s[n] = sin(2π·f1·n) + 0.5·sin(2π·f2·n) + 0.3·sin(2π·f3·n)
+    // f1=0.004, f2=0.009, f3=0.015  — все существенно ниже f_Найквиста/2
+    {
+        Signal clean(N);
+        const double f1 = 0.004, f2 = 0.009, f3 = 0.015;
+        for (size_t n = 0; n < N; ++n) {
+            double t = static_cast<double>(n);
+            clean[n] = std::sin(2.0*PI*f1*t)
+                     + 0.5 * std::sin(2.0*PI*f2*t)
+                     + 0.3 * std::sin(2.0*PI*f3*t);
+        }
+        dataset.emplace_back(clean, addGaussian(clean));
+    }
+
+    // ── Сигнал 4: Медленный синус + импульсные выбросы ───────────────────────
+    {
+        Signal clean(N);
+        const double f = 0.006, A = 1.0;
+        for (size_t n = 0; n < N; ++n)
+            clean[n] = A * std::sin(2.0 * PI * f * static_cast<double>(n));
+        Signal noisy = addImpulses(clean, impulseDensity, impulseAmplitude);
+        dataset.emplace_back(clean, noisy);
+    }
+
+    // ── Сигнал 5: Затухающая синусоида + импульсные выбросы ──────────────────
+    // s[n] = A·exp(-n/τ)·sin(2π·f·n), f = 0.008, τ = N/4
+    {
+        Signal clean(N);
+        const double f = 0.008, A = 1.0, tau = static_cast<double>(N) / 4.0;
+        for (size_t n = 0; n < N; ++n) {
+            double t = static_cast<double>(n);
+            clean[n] = A * std::exp(-t / tau) * std::sin(2.0 * PI * f * t);
+        }
+        Signal noisy = addImpulses(clean, impulseDensity, impulseAmplitude);
+        dataset.emplace_back(clean, noisy);
+    }
+
+    // ── Сигнал 6: Ступенчатая функция с плавными переходами + смешанный шум ──
+    // Три ступени, переходы сглажены тангенсом (медленно меняющийся сигнал)
+    {
+        Signal clean(N);
+        // Позиции переходов (относительные)
+        const double pos1 = 0.30, pos2 = 0.65;
+        const double steepness = 20.0 / static_cast<double>(N); // ширина перехода
+        for (size_t n = 0; n < N; ++n) {
+            double t = static_cast<double>(n) / static_cast<double>(N);
+            // Сглаженная ступенька через tanh
+            double step1 = 0.5 * (1.0 + std::tanh((t - pos1) / steepness));
+            double step2 = 0.5 * (1.0 + std::tanh((t - pos2) / steepness));
+            clean[n] = -0.5 + step1 * 1.0 + step2 * 0.5; // уровни: -0.5, 0.5, 1.0
+        }
+        // Смешанный шум: гауссов + редкие импульсы
+        Signal noisy = addGaussian(clean);
+        noisy = addImpulses(noisy, impulseDensity * 0.5, impulseAmplitude);
+        dataset.emplace_back(clean, noisy);
+    }
+
+    // ── Сигнал 7: Медленный линейный тренд + гауссов шум + редкие импульсы ───
+    // s[n] = -1 + 2·n/(N-1)  — линейный рост от -1 до +1
+    {
+        Signal clean(N);
+        for (size_t n = 0; n < N; ++n)
+            clean[n] = -1.0 + 2.0 * static_cast<double>(n) / static_cast<double>(N - 1);
+        Signal noisy = addGaussian(clean);
+        noisy = addImpulses(noisy, impulseDensity * 0.5, impulseAmplitude);
+        dataset.emplace_back(clean, noisy);
+    }
+
+    return dataset;
+}
+
 void SignalGenerator::saveSignalToCSV(const Signal& signal, const std::string& filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {

@@ -32,6 +32,9 @@ set(FILTER_SOURCES
     src/kalman_filter.cpp
     src/signal_generator.cpp
     src/performance_tester.cpp
+    src/signal_classifier.cpp
+    src/adaptive_filter_selector.cpp
+    src/spectral_subtraction_filter.cpp
     src/utils/linear_system_solver.cpp
 )
 
@@ -46,8 +49,12 @@ set(FILTER_HEADERS
     src/kalman_filter.h
     src/signal_generator.h
     src/performance_tester.h
+    src/signal_classifier.h
+    src/adaptive_filter_selector.h
+    src/spectral_subtraction_filter.h
     src/utils/linear_system_solver.h
     src/utils/median.h
+    src/utils/fft.h
 )
 
 add_library(echo_filters STATIC ${FILTER_SOURCES} ${FILTER_HEADERS})
@@ -60,6 +67,17 @@ target_link_libraries(echo_filter_test echo_filters Threads::Threads)
 # Программа для генерации тестовых данных
 add_executable(generate_test_data src/generate_data.cpp)
 target_link_libraries(generate_test_data echo_filters)
+
+# Генератор расширенных составных нелинейных сигналов (4096 точек)
+add_executable(generate_extended_data src/generate_extended_data.cpp)
+target_link_libraries(generate_extended_data echo_filters)
+target_compile_options(generate_extended_data PRIVATE -O2 -Wall -Wextra)
+
+# Генератор специализированных сигналов для фильтра Винера
+# Все сигналы: медленно меняющийся истинный сигнал + высокочастотные/импульсные помехи
+add_executable(generate_wiener_data src/generate_wiener_data.cpp)
+target_link_libraries(generate_wiener_data echo_filters)
+target_compile_options(generate_wiener_data PRIVATE -O2 -Wall -Wextra)
 
 # GUI программа для визуализации фильтров
 set(GUI_SOURCES

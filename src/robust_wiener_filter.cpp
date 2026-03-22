@@ -1,6 +1,7 @@
 #include "robust_wiener_filter.h"
 #include "utils/linear_system_solver.h"
 #include "utils/median.h"
+#include "utils/fft.h"
 
 #include <stdexcept>
 #include <cmath>
@@ -74,6 +75,126 @@ std::string RobustWienerFilter::getName() const
 std::vector<double> RobustWienerFilter::getWeights() const
 {
     return std::vector<double>(weights_.begin(), weights_.end());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Комбинированная авто-настройка параметров (A: статистика + B: спектр)
+// ─────────────────────────────────────────────────────────────────────────────
+
+WienerParams RobustWienerFilter::estimateParameters(const std::vector<double>& signal)
+{
+    WienerParams p{};
+    const size_t N = signal.size();
+
+    if (N < 8) {
+        // Слишком короткий сигнал — возвращаем безопасные значения по умолчанию
+        p.filterOrder      = 4;
+        p.desiredWindow    = 3;
+        p.regularization   = 1e-4;
+        p.outlierThreshold = 3.5;
+        p.outlierWindow    = 9;
+        return p;
+    }
+
+    // ── Вариант A: статистический анализ ─────────────────────────────────────
+
+    // 1. RMS входного сигнала
+    double sumSq = 0.0;
+    for (double v : signal) sumSq += v * v;
+    p.estimatedSignalRMS = std::sqrt(sumSq / static_cast<double>(N));
+
+    // 2. MAD (медиана абсолютных отклонений от медианы) → оценка σ шума
+    std::vector<double> buf(signal);
+    std::nth_element(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(N / 2), buf.end());
+    const double med = buf[N / 2];
+    for (double& v : buf) v = std::abs(v - med);
+    std::nth_element(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(N / 2), buf.end());
+    const double madVal = buf[N / 2];
+    p.estimatedNoiseSigma = madVal / 0.6745; // оценка σ для гауссова шума
+
+    // 3. SNR в дБ
+    const double snr = (p.estimatedNoiseSigma > 1e-12)
+        ? (p.estimatedSignalRMS / p.estimatedNoiseSigma)
+        : 1000.0;
+    p.estimatedSNR_dB = 20.0 * std::log10(snr);
+
+    // 4. outlierThreshold: чем меньше SNR — тем ниже порог (детектор чувствительнее)
+    if (p.estimatedSNR_dB < 5.0)
+        p.outlierThreshold = 2.5;   // шумный сигнал — ловим даже небольшие выбросы
+    else if (p.estimatedSNR_dB < 15.0)
+        p.outlierThreshold = 3.5;   // умеренный шум — стандартный порог
+    else
+        p.outlierThreshold = 5.0;   // чистый сигнал — только явные выбросы
+
+    // 5. regularization масштабируется с дисперсией шума
+    p.regularization = p.estimatedNoiseSigma * p.estimatedNoiseSigma;
+    if (p.regularization < 1e-9) p.regularization = 1e-4; // минимальная регуляризация
+    if (p.regularization > 1e-1) p.regularization = 1e-1; // макисмальная регуляризация
+    // ── Вариант B: спектральный анализ для подбора порядка фильтра ───────────
+
+    // 6. FFT входного сигнала
+    CVector spectrum = fft(signal);
+    const size_t fftLen = spectrum.size(); // степень двойки >= N
+    const size_t halfLen = fftLen / 2;     // только положительные частоты
+
+    // 7. Спектр мощности — только положительные частоты [0 .. halfLen-1]
+    //    Нормированная частота k-го бина: f_k = k / fftLen  (диапазон 0..0.5)
+    std::vector<double> powerSpectrum(halfLen);
+    double totalPower = 0.0;
+    for (size_t k = 0; k < halfLen; ++k) {
+        powerSpectrum[k] = std::norm(spectrum[k]); // |X[k]|²
+        totalPower += powerSpectrum[k];
+    }
+
+    // 8. Найти доминирующую частоту (бин с максимальной мощностью, кроме DC)
+    size_t dominantBin = 1;
+    double maxPow = 0.0;
+    for (size_t k = 1; k < halfLen; ++k) {
+        if (powerSpectrum[k] > maxPow) {
+            maxPow = powerSpectrum[k];
+            dominantBin = k;
+        }
+    }
+    p.dominantFrequency = static_cast<double>(dominantBin) / static_cast<double>(fftLen);
+
+    // 9. Найти f_95 — нормированная частота, ниже которой 95% мощности
+    //    Используется для оценки "ширины полосы" полезного сигнала
+    double cumPow = 0.0;
+    const double threshold95 = 0.95 * totalPower;
+    size_t bin95 = halfLen - 1;
+    for (size_t k = 0; k < halfLen; ++k) {
+        cumPow += powerSpectrum[k];
+        if (cumPow >= threshold95) {
+            bin95 = k;
+            break;
+        }
+    }
+    const double f95 = static_cast<double>(bin95 + 1) / static_cast<double>(fftLen);
+
+    // 10. filterOrder = round(0.75 / f_95): компромисс между «памятью» и переподгонкой.
+    //     • f_95 — частота, ниже которой 95% мощности спектра
+    //     • 0.75/f_95 ≈ 3/4 периода: достаточно для захвата формы сигнала,
+    //       но не так велико, чтобы начать «запоминать» шум
+    //     Ограничиваем диапазоном [8, 256]
+    const double rawOrder = 0.75 / std::max(f95, 0.003); // защита от нуля
+    const size_t rawOrderInt = static_cast<size_t>(std::round(rawOrder));
+    p.filterOrder = std::clamp(rawOrderInt, size_t(8), size_t(256));
+
+    // 11. desiredWindow ≈ filterOrder * 2 / 5, нечётное, диапазон [5, 127]
+    //     Примерно 40% от порядка фильтра — достаточно широкое окно медианы,
+    //     чтобы надёжно оценить медленный тренд, но не сглаживать детали
+    size_t dw = std::max(size_t(5), p.filterOrder * 2 / 5);
+    if (dw % 2 == 0) ++dw;
+    p.desiredWindow = std::min(dw, size_t(127));
+
+    // 12. outlierWindow ≈ filterOrder * 2 + 1, нечётное, диапазон [7, 201]
+    //     Окно MAD-детектора: в 2 раза шире порядка фильтра для
+    //     устойчивой локальной статистики шума
+    size_t ow = p.filterOrder * 2 + 1;
+    if (ow % 2 == 0) ++ow;
+    p.outlierWindow = std::clamp(ow, size_t(7), size_t(201));
+
+    return p;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

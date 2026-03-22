@@ -7,6 +7,9 @@
 #include "../src/outlier_detection.h"
 #include "../src/savgol_filter.h"
 #include "../src/kalman_filter.h"
+#include "../src/spectral_subtraction_filter.h"
+#include "../src/signal_classifier.h"
+#include "../src/adaptive_filter_selector.h"
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,7 +20,7 @@
 void printUsage(const char* programName) {
     std::cout << "Использование: " << programName << " [опции]\n\n";
     std::cout << "Опции:\n";
-    std::cout << "  -f, --filter TYPE        Тип фильтра: median, wiener, robust_wiener, morpho, outlier, savgol, kalman\n";
+    std::cout << "  -f, --filter TYPE        Тип фильтра: median, wiener, robust_wiener, robust_wiener_auto, morpho, outlier, savgol, kalman, spectral, auto\n";
     std::cout << "  -i, --input FILE         Входной файл с зашумленным сигналом (.csv)\n";
     std::cout << "  -c, --clean FILE         Чистый сигнал для сравнения (.csv)\n";
     std::cout << "  -p, --params PARAMS      Параметры фильтра (зависят от типа)\n";
@@ -30,17 +33,31 @@ void printUsage(const char* programName) {
     std::cout << "  robust_wiener:           order,desired_window,regularization,outlier_threshold,outlier_window\n";
     std::cout << "                           (по умолчанию 10,5,1e-4,3.5,11)\n";
     std::cout << "                           Улучшения: медианная оценка d[n], детекция импульсов, zero-padding\n";
+    std::cout << "  robust_wiener_auto:      параметры подбираются автоматически по входному сигналу\n";
+    std::cout << "                           A: sigma_noise=MAD/0.6745 → outlierThreshold, regularization=σ²\n";
+    std::cout << "                           B: FFT → f_95 → filterOrder=round(1/(2·f_95))\n";
+    std::cout << "                           Подходит когда параметры сигнала заранее неизвестны\n";
     std::cout << "  morpho:                  operation,size (operation: opening/closing, по умолчанию opening,5)\n";
     std::cout << "  outlier:                 method,interpolation,threshold,window (по умолчанию mad,linear,3.0,11)\n";
     std::cout << "  savgol:                  window_size,poly_order (по умолчанию 11,3)\n";
-    std::cout << "  kalman:                  process_noise,measurement_noise,delta_t (по умолчанию 0.1,1.0,1.0)\n\n";
+    std::cout << "  kalman:                  process_noise,measurement_noise,delta_t (по умолчанию 0.1,1.0,1.0)\n";
+    std::cout << "  spectral:                frame_size,hop_size,noise_frames,alpha,floor,mu,gamma\n";
+    std::cout << "                           (по умолчанию 256,64,4,2.0,0.002,0.1,1.5)\n";
+    std::cout << "                           FFT-based спектральное вычитание (Boll, 1979)\n";
+    std::cout << "  auto:                    автоматический выбор фильтра по типу сигнала\n";
+    std::cout << "                           Классификация: SINE→Wiener, SQUARE→Median, TRIANGLE→SavGol,\n";
+    std::cout << "                           ECHO→Kalman, NOISY→RobustWiener, UNKNOWN→Median\n\n";
 
     std::cout << "Примеры:\n";
     std::cout << "  " << programName << " -f median         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
     std::cout << "  " << programName << " -f wiener         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 32,31,1e-4\n";
     std::cout << "  " << programName << " -f robust_wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
     std::cout << "  " << programName << " -f robust_wiener  -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 10,5,1e-4,3.5,11\n";
+    std::cout << "  " << programName << " -f robust_wiener_auto -i data/wiener/noisy/signal_0.csv -c data/wiener/clean/signal_0.csv\n";
     std::cout << "  " << programName << " -f kalman         -i data/noisy/signal_1.csv -c data/clean/signal_1.csv --prefilter\n";
+    std::cout << "  " << programName << " -f spectral       -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
+    std::cout << "  " << programName << " -f spectral       -i data/noisy/signal_1.csv -c data/clean/signal_1.csv -p 512,128,6,3.0,0.002\n";
+    std::cout << "  " << programName << " -f auto           -i data/noisy/signal_1.csv -c data/clean/signal_1.csv\n";
 }
 
 struct FilterParams {
@@ -214,6 +231,35 @@ std::unique_ptr<SignalProcessor> createFilter(const std::string& type, const std
         }
         return std::make_unique<KalmanFilter>(processNoise, measurementNoise, deltaT);
     }
+    else if (type == "spectral") {
+        // frame_size, hop_size, noise_frames, alpha, floor, mu, gamma
+        int    frameSize         = 256;
+        int    hopSize           = 64;
+        int    noiseFrames       = 4;
+        double subtractionFactor = 2.0;
+        double spectralFloor     = 0.002;
+        double noiseUpdateRate   = 0.1;
+        double noiseThreshold    = 1.5;
+
+        if (!params.empty()) {
+            auto parts = split(params, ',');
+            if (parts.size() >= 1) frameSize         = std::stoi(parts[0]);
+            if (parts.size() >= 2) hopSize           = std::stoi(parts[1]);
+            if (parts.size() >= 3) noiseFrames       = std::stoi(parts[2]);
+            if (parts.size() >= 4) subtractionFactor = std::stod(parts[3]);
+            if (parts.size() >= 5) spectralFloor     = std::stod(parts[4]);
+            if (parts.size() >= 6) noiseUpdateRate   = std::stod(parts[5]);
+            if (parts.size() >= 7) noiseThreshold    = std::stod(parts[6]);
+        }
+        return std::make_unique<SpectralSubtractionFilter>(
+            static_cast<size_t>(frameSize),
+            static_cast<size_t>(hopSize),
+            static_cast<size_t>(noiseFrames),
+            subtractionFactor,
+            spectralFloor,
+            noiseUpdateRate,
+            noiseThreshold);
+    }
     else {
         throw std::runtime_error("Неизвестный тип фильтра: " + type);
     }
@@ -273,17 +319,80 @@ int main(int argc, char* argv[]) {
         if (!params.params.empty()) std::cout << " (параметры: " << params.params << ")";
         std::cout << "\n";
 
-        auto filter = createFilter(params.filterType, params.params);
+        SignalProcessor::Signal filteredSignal;
+        long long filterTime = 0;
+        std::string algorithmDescription;
 
-        std::cout << "Применение фильтрации...\n";
-        auto [filteredSignal, filterTime] = filter->measurePerformance(inputForFilter);
+        if (params.filterType == "robust_wiener_auto") {
+            // ── Робастный Винер с автоподбором параметров A+B ─────────────────
+            std::cout << "Анализ входного сигнала для авто-настройки параметров...\n";
+
+            WienerParams wp = RobustWienerFilter::estimateParameters(inputForFilter);
+
+            std::cout << "\n=== АВТО-НАСТРОЙКА RobustWienerFilter ===\n";
+            std::cout << "  Оценка σ_noise (MAD/0.6745): " << std::fixed << std::setprecision(4)
+                      << wp.estimatedNoiseSigma << "\n";
+            std::cout << "  RMS сигнала:                 " << wp.estimatedSignalRMS << "\n";
+            std::cout << "  Оценка SNR:                  " << std::setprecision(1)
+                      << wp.estimatedSNR_dB << " дБ\n";
+            std::cout << "  Доминирующая частота:        " << std::setprecision(4)
+                      << wp.dominantFrequency << " (нормированная)\n";
+            std::cout << "\nПодобранные параметры:\n";
+            std::cout << "  filterOrder      = " << wp.filterOrder      << "\n";
+            std::cout << "  desiredWindow    = " << wp.desiredWindow    << "\n";
+            std::cout << "  regularization   = " << std::scientific << wp.regularization   << "\n";
+            std::cout << "  outlierThreshold = " << std::fixed << std::setprecision(2)
+                      << wp.outlierThreshold << "\n";
+            std::cout << "  outlierWindow    = " << wp.outlierWindow    << "\n\n";
+
+            RobustWienerFilter filter(wp.filterOrder, wp.desiredWindow,
+                                      wp.regularization, wp.outlierThreshold,
+                                      wp.outlierWindow);
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            filteredSignal = filter.process(inputForFilter);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            filterTime = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+            algorithmDescription = "RobustWienerAuto[ord=" + std::to_string(wp.filterOrder)
+                + ",win=" + std::to_string(wp.desiredWindow)
+                + ",thr=" + std::to_string(static_cast<int>(wp.outlierThreshold * 10) / 10)
+                + "]";
+
+        } else if (params.filterType == "auto") {
+            // ── Автоматический режим: классификация → выбор → применение ─────
+            AdaptiveFilterSelector selector;
+            SignalClassifier::SignalType detectedType;
+            std::string chosenFilterName;
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            filteredSignal = selector.processAuto(inputForFilter, detectedType, chosenFilterName);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            filterTime = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+            std::cout << "\n=== АВТОМАТИЧЕСКАЯ КЛАССИФИКАЦИЯ ===\n";
+            std::cout << "Обнаруженный тип сигнала: "
+                      << SignalClassifier::typeToString(detectedType) << "\n";
+            std::cout << "Причина выбора: "
+                      << AdaptiveFilterSelector::getSelectionReason(detectedType) << "\n";
+            std::cout << "Выбранный фильтр: " << chosenFilterName << "\n";
+
+            algorithmDescription = "AUTO[" + SignalClassifier::typeToString(detectedType)
+                                   + "] → " + chosenFilterName;
+        } else {
+            auto filter = createFilter(params.filterType, params.params);
+            auto [out, ft] = filter->measurePerformance(inputForFilter);
+            filteredSignal = std::move(out);
+            filterTime     = ft;
+            if (params.prefilter)
+                algorithmDescription = "OutlierDetection → " + filter->getName();
+            else
+                algorithmDescription = filter->getName();
+        }
 
         // ── Метрики ───────────────────────────────────────────────────────
         std::cout << "\n=== РЕЗУЛЬТАТЫ ФИЛЬТРАЦИИ ===\n";
-        if (params.prefilter)
-            std::cout << "Цепочка: OutlierDetection → " << filter->getName() << "\n";
-        else
-            std::cout << "Алгоритм: " << filter->getName() << "\n";
+        std::cout << "Алгоритм: " << algorithmDescription << "\n";
 
         std::cout << "Время предфильтра: " << prefilterTime << " мкс\n";
         std::cout << "Время основного фильтра: " << filterTime  << " мкс\n";
@@ -315,7 +424,7 @@ int main(int argc, char* argv[]) {
         std::cout << "\nИнициализация OpenGL визуализации...\n";
 
         std::string title = "Signal Filter Visualization - ";
-        title += params.prefilter ? ("Outlier → " + filter->getName()) : filter->getName();
+        title += algorithmDescription;
 
         SignalVisualizer visualizer(1200, 800, title);
 
@@ -331,7 +440,8 @@ int main(int argc, char* argv[]) {
         if (!cleanSignal.empty()) std::cout << "  Зеленый - чистый сигнал\n";
         std::cout << "  Красный - зашумленный сигнал\n";
         std::cout << "  Синий   - отфильтрованный сигнал";
-        if (params.prefilter) std::cout << " (двухэтапный)";
+        if (params.filterType == "auto" || params.prefilter)
+            std::cout << " (" << algorithmDescription << ")";
         std::cout << "\n";
 
         visualizer.run();
