@@ -8,10 +8,6 @@
 #include <algorithm>
 #include <numeric>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Конструктор / setParameters
-// ─────────────────────────────────────────────────────────────────────────────
-
 RobustWienerFilter::RobustWienerFilter(size_t filterOrder,
                                        size_t desiredWindow,
                                        double regularization,
@@ -107,7 +103,9 @@ WienerParams RobustWienerFilter::estimateParameters(const std::vector<double>& s
     std::vector<double> buf(signal);
     std::nth_element(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(N / 2), buf.end());
     const double med = buf[N / 2];
-    for (double& v : buf) v = std::abs(v - med);
+    for (double v : buf) {
+        v = std::abs(v - med);
+    }
     std::nth_element(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(N / 2), buf.end());
     const double madVal = buf[N / 2];
     p.estimatedNoiseSigma = madVal / 0.6745; // оценка σ для гауссова шума

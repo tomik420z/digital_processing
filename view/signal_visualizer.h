@@ -38,11 +38,14 @@ private:
     bool showNoisy_;
     bool showFiltered_;
 
-    // OpenGL объекты
+    // OpenGL объекты (для рисования сигналов/сетки)
     GLuint shaderProgram_;
     GLuint originalVAO_, originalVBO_;
     GLuint noisyVAO_, noisyVBO_;
     GLuint filteredVAO_, filteredVBO_;
+
+    // Шейдерная программа для отрисовки текстур кнопок
+    GLuint textureShaderProgram_;
 
     // Цвета для сигналов
     struct Color {
@@ -50,15 +53,18 @@ private:
         Color(float r, float g, float b) : r(r), g(g), b(b) {}
     };
 
-    // Параметры кнопок переключения
+    // Параметры прямоугольной кнопки с PNG-иконкой
     struct Button {
         float centerX, centerY;
-        float radius;
+        float halfW, halfH;   // полуширина и полувысота в NDC
         Color color;
         bool* visibility;
+        GLuint textureID;     // OpenGL ID текстуры из PNG
+        bool   isHovered;     // курсор над кнопкой?
 
-        Button(float x, float y, float r, const Color& c, bool* vis)
-            : centerX(x), centerY(y), radius(r), color(c), visibility(vis) {}
+        Button(float x, float y, float hw, float hh, const Color& c, bool* vis)
+            : centerX(x), centerY(y), halfW(hw), halfH(hh),
+              color(c), visibility(vis), textureID(0), isHovered(false) {}
     };
 
     std::vector<Button> toggleButtons_;
@@ -89,9 +95,9 @@ public:
 
     /**
      * Установить данные сигналов для отображения
-     * @param original Чистый сигнал (опционально)
-     * @param noisy Зашумленный сигнал
-     * @param filtered Отфильтрованный сигнал
+     * @param noisy     Зашумлённый сигнал
+     * @param filtered  Отфильтрованный сигнал
+     * @param original  Чистый сигнал (опционально)
      */
     void setSignalData(const SignalProcessor::Signal& noisy,
                       const SignalProcessor::Signal& filtered,
@@ -129,9 +135,14 @@ private:
     bool initializeGLEW();
 
     /**
-     * Создание шейдерной программы
+     * Создание шейдерной программы для линий/сетки
      */
     bool createShaderProgram();
+
+    /**
+     * Создание шейдерной программы для текстурных кнопок
+     */
+    bool createTextureShaderProgram();
 
     /**
      * Компиляция шейдера
@@ -199,9 +210,25 @@ private:
     static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 
     /**
-     * Инициализация кнопок переключения
+     * Callback для отслеживания позиции курсора (hover)
+     */
+    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
+
+    /**
+     * Обновить состояние hover для всех кнопок
+     */
+    void updateHoverState(double x, double y);
+
+    /**
+     * Инициализация кнопок переключения (загрузка PNG текстур)
      */
     void initializeToggleButtons();
+
+    /**
+     * Загрузка PNG файла как текстуры OpenGL
+     * @return textureID или 0 при ошибке
+     */
+    GLuint loadTexture(const std::string& path);
 
     /**
      * Отрисовка кнопок переключения
@@ -209,9 +236,9 @@ private:
     void drawToggleButtons();
 
     /**
-     * Отрисовка круглой кнопки
+     * Отрисовка прямоугольной кнопки с PNG-иконкой
      */
-    void drawCircleButton(const Button& button);
+    void drawRectButton(const Button& button);
 
     /**
      * Проверка клика по кнопке
@@ -242,6 +269,11 @@ private:
      * Обновить матрицы трансформации с учетом зума и панорамирования
      */
     void updateViewTransform();
+
+    /**
+     * Освобождение текстур кнопок
+     */
+    void cleanupButtonTextures();
 
     /**
      * Очистка ресурсов OpenGL

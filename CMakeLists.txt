@@ -83,6 +83,7 @@ target_compile_options(generate_wiener_data PRIVATE -O2 -Wall -Wextra)
 set(GUI_SOURCES
     view/main_gui.cpp
     view/signal_visualizer.cpp
+    view/stb_image.cpp
 )
 
 set(GUI_HEADERS

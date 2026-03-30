@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40" width="80" height="40">
+  <!-- Фон кнопки -->
+  <rect x="1" y="1" width="78" height="38" rx="4" ry="4"
+        fill="#7a1a1a" stroke="#ff4a4a" stroke-width="1.5"/>
+
+  <!-- Зашумлённый сигнал (хаотичная красная линия) -->
+  <polyline
+    points="4,20 6,12 8,28 10,8 12,32 14,18 16,6 18,30 20,15 22,26 24,10 26,34 28,18 30,5 32,29 34,22 36,11 38,33 40,16 42,7 44,28 46,14 48,32 50,9 52,25 54,19 56,30 58,11 60,23 62,7 64,31 66,17 68,28 70,12 72,24 74,16 76,20"
+    fill="none"
+    stroke="#ff4444"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+
+  <!-- Подпись -->
+  <text x="40" y="38" text-anchor="middle"
+        font-family="monospace" font-size="5" fill="#ffaaaa">NOISY</text>
+</svg>
