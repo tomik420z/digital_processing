@@ -35,6 +35,7 @@ set(FILTER_SOURCES
     src/signal_classifier.cpp
     src/adaptive_filter_selector.cpp
     src/spectral_subtraction_filter.cpp
+    src/doppler_nip_filter.cpp
     src/utils/linear_system_solver.cpp
 )
 
@@ -52,6 +53,7 @@ set(FILTER_HEADERS
     src/signal_classifier.h
     src/adaptive_filter_selector.h
     src/spectral_subtraction_filter.h
+    src/doppler_nip_filter.h
     src/utils/linear_system_solver.h
     src/utils/median.h
     src/utils/fft.h
@@ -78,6 +80,12 @@ target_compile_options(generate_extended_data PRIVATE -O2 -Wall -Wextra)
 add_executable(generate_wiener_data src/generate_wiener_data.cpp)
 target_link_libraries(generate_wiener_data echo_filters)
 target_compile_options(generate_wiener_data PRIVATE -O2 -Wall -Wextra)
+
+# Генератор тестовых РЛС данных для алгоритма подавления НИП
+# (доплеровские фазовые фильтры)
+add_executable(generate_radar_data src/generate_radar_data.cpp)
+target_link_libraries(generate_radar_data echo_filters)
+target_compile_options(generate_radar_data PRIVATE -O2 -Wall -Wextra)
 
 # GUI программа для визуализации фильтров
 set(GUI_SOURCES
@@ -110,4 +118,5 @@ target_compile_options(pipeline_benchmark PRIVATE -O2 -Wall -Wextra)
 
 # Установка целей
 install(TARGETS echo_filter_test generate_test_data signal_filter_gui pipeline_benchmark
+                generate_radar_data
         RUNTIME DESTINATION bin)
