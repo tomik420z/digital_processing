@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="48" viewBox="0 0 120 48">
+  <!-- Фон -->
+  <rect width="120" height="48" rx="6" fill="#0a0a2a"/>
+  <!-- Подпись -->
+  <text x="60" y="12" font-family="monospace" font-size="9" fill="#6699ff" text-anchor="middle" font-weight="bold">СПЕКТР ПОСЛЕ</text>
+  <!-- Спектральная кривая (после компенсации — ровный шумовой пол) -->
+  <polyline points="4,38 14,37 24,36 34,36 44,37 54,36 64,35 70,36 76,35 82,36 90,37 100,36 110,37 116,38"
+            fill="none" stroke="#4488ff" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Горизонтальная ось -->
+  <line x1="4" y1="42" x2="116" y2="42" stroke="#555" stroke-width="1"/>
+</svg>

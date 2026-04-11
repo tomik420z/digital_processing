@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="48" viewBox="0 0 120 48">
+  <!-- Фон -->
+  <rect width="120" height="48" rx="6" fill="#2a0a0a"/>
+  <!-- Подпись -->
+  <text x="60" y="12" font-family="monospace" font-size="9" fill="#ff6666" text-anchor="middle" font-weight="bold">СПЕКТР ДО</text>
+  <!-- Спектральная кривая (до компенсации — с выбросом НИП) -->
+  <polyline points="4,38 14,36 24,34 34,30 44,32 54,20 64,12 70,8 76,12 82,20 90,30 100,34 110,36 116,38"
+            fill="none" stroke="#ff4444" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Вертикальная метка НИП (пик) -->
+  <line x1="70" y1="8" x2="70" y2="42" stroke="#ff8888" stroke-width="1" stroke-dasharray="2,2"/>
+  <!-- Горизонтальная ось -->
+  <line x1="4" y1="42" x2="116" y2="42" stroke="#555" stroke-width="1"/>
+</svg>

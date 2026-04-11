@@ -10,6 +10,7 @@
 #include "../src/spectral_subtraction_filter.h"
 #include "../src/signal_classifier.h"
 #include "../src/adaptive_filter_selector.h"
+#include "../src/doppler_nip_filter.h"
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,9 +18,100 @@
 #include <format>
 #include <iomanip>
 
+// ─── Режим РЛС: обработка НИП доплеровскими фазовыми фильтрами ───────────────
+/**
+ * Запустить режим визуализации РЛС (split-view).
+ *
+ * @param noisyFile   CSV-файл с НИП (Re,Im на строку)
+ * @param cleanFile   CSV-файл чистого сигнала (Re,Im, опционально)
+ * @param threshold   Порог CV обнаружения НИП (по умолчанию 0.5)
+ * @return            0 при успехе
+ */
+int runRadarMode(const std::string& noisyFile,
+                 const std::string& cleanFile,
+                 double threshold = 0.50)
+{
+    std::cout << "\n=== РЕЖИМ РЛС: ПОДАВЛЕНИЕ НИП (ДОПЛЕРОВСКИЕ ФАЗОВЫЕ ФИЛЬТРЫ) ===\n\n";
+
+    // ── Загрузка входных данных ────────────────────────────────────────────
+    std::cout << "Загрузка зашумлённой пачки: " << noisyFile << "\n";
+    ComplexSignal noisyBurst = DopplerNipFilter::loadFromCSV(noisyFile);
+    if (noisyBurst.empty()) {
+        std::cerr << "Ошибка: файл пуст или не найден: " << noisyFile << "\n";
+        return 1;
+    }
+    std::cout << "  N = " << noisyBurst.size() << " импульсов\n";
+
+    ComplexSignal cleanBurst;
+    if (!cleanFile.empty()) {
+        std::cout << "Загрузка чистой пачки: " << cleanFile << "\n";
+        cleanBurst = DopplerNipFilter::loadFromCSV(cleanFile);
+    }
+
+    // ── Применяем алгоритм ────────────────────────────────────────────────
+    DopplerNipFilter nipFilter(threshold, 0.05, 0);
+    ComplexSignal filteredBurst = nipFilter.process(noisyBurst);
+
+    const NipDetectionResult& det = nipFilter.getLastDetection();
+    std::cout << "\n--- Результат обнаружения ---\n";
+    if (det.detected) {
+        std::cout << "  НИП обнаружена!\n";
+        std::cout << "  Импульс m = " << det.pulseIndex << "\n";
+        std::cout << "  Амплитуда = " << std::fixed << std::setprecision(4) << det.amplitude << "\n";
+        std::cout << "  Фаза φ₀  = " << det.phaseRad << " рад\n";
+        std::cout << "  CV-метрика= " << det.detectionMetric << "\n";
+    } else {
+        std::cout << "  НИП не обнаружена (CV = " << det.detectionMetric << ")\n";
+    }
+
+    // ── Временные сигналы: огибающие |x[n]| ──────────────────────────────
+    SignalProcessor::Signal noisyMag    = DopplerNipFilter::getMagnitude(noisyBurst);
+    SignalProcessor::Signal filteredMag = DopplerNipFilter::getMagnitude(filteredBurst);
+    SignalProcessor::Signal cleanMag;
+    if (!cleanBurst.empty())
+        cleanMag = DopplerNipFilter::getMagnitude(cleanBurst);
+
+    // ── Спектральные данные ───────────────────────────────────────────────
+    SignalProcessor::Signal specBefore = nipFilter.getSpectrumBefore();
+    SignalProcessor::Signal specAfter  = nipFilter.getSpectrumAfter();
+    SignalProcessor::Signal specDiff   = nipFilter.getSpectrumDiff();
+
+    // ── OpenGL визуализация ───────────────────────────────────────────────
+    std::cout << "\nЗапуск OpenGL split-view...\n";
+    std::cout << "  Верхняя панель: огибающая |x[n]| (время / импульсы)\n";
+    std::cout << "  Нижняя панель: доплеровский спектр (дБ)\n";
+    std::cout << "  Клавиши: G=чистый N=зашумлённый F=компенсированный\n";
+    std::cout << "           1=спектр_до 2=спектр_после 3=разность_НИП\n";
+
+    std::string title = "Doppler NIP Filter | N=" + std::to_string(noisyBurst.size());
+    if (det.detected)
+        title += " | НИП обнаружена [m=" + std::to_string(det.pulseIndex) + "]";
+    else
+        title += " | НИП не обнаружена";
+
+    SignalVisualizer visualizer(1400, 850, title);
+    if (!visualizer.initialize()) {
+        std::cerr << "Ошибка инициализации OpenGL\n";
+        return 1;
+    }
+
+    // Устанавливаем временной сигнал (огибающие)
+    visualizer.setSignalData(noisyMag, filteredMag, cleanMag);
+
+    // Включаем split-view со спектрами
+    visualizer.enableSplitView(specBefore, specAfter, specDiff, 0.60f);
+
+    visualizer.run();
+    return 0;
+}
+
 void printUsage(const char* programName) {
     std::cout << "Использование: " << programName << " [опции]\n\n";
     std::cout << "Опции:\n";
+    std::cout << "  --radar FILE             РЛС-режим: подавление НИП (split-view)\n";
+    std::cout << "                           FILE — CSV с НИП (Re,Im на строку)\n";
+    std::cout << "  --radar-clean FILE       Чистая пачка для сравнения (Re,Im CSV)\n";
+    std::cout << "  --nip-threshold THR      Порог CV для обнаружения НИП (по умолч. 0.50)\n";
     std::cout << "  -f, --filter TYPE        Тип фильтра: median, wiener, robust_wiener, robust_wiener_auto, morpho, outlier, savgol, kalman, spectral, auto\n";
     std::cout << "  -i, --input FILE         Входной файл с зашумленным сигналом (.csv)\n";
     std::cout << "  -c, --clean FILE         Чистый сигнал для сравнения (.csv)\n";
@@ -65,7 +157,12 @@ struct FilterParams {
     std::string inputFile;
     std::string cleanFile;
     std::string params;
-    bool        prefilter = false; ///< запустить outlier_detection перед основным фильтром
+    bool        prefilter    = false; ///< запустить outlier_detection перед основным фильтром
+    // РЛС-режим
+    bool        radarMode    = false;
+    std::string radarFile;            ///< файл пачки с НИП (Re,Im)
+    std::string radarCleanFile;       ///< чистая пачка (Re,Im)
+    double      nipThreshold = 0.50;  ///< порог CV для обнаружения НИП
 };
 
 FilterParams parseCommandLine(int argc, char* argv[]) {
@@ -78,6 +175,18 @@ FilterParams parseCommandLine(int argc, char* argv[]) {
             printUsage(argv[0]);
             exit(0);
         }
+        // ── РЛС-режим ──────────────────────────────────────────────────────
+        else if (arg == "--radar" && i + 1 < argc) {
+            params.radarMode = true;
+            params.radarFile = argv[++i];
+        }
+        else if (arg == "--radar-clean" && i + 1 < argc) {
+            params.radarCleanFile = argv[++i];
+        }
+        else if (arg == "--nip-threshold" && i + 1 < argc) {
+            params.nipThreshold = std::stod(argv[++i]);
+        }
+        // ── Обычный режим ──────────────────────────────────────────────────
         else if ((arg == "-f" || arg == "--filter") && i + 1 < argc) {
             params.filterType = argv[++i];
         }
@@ -277,6 +386,13 @@ int main(int argc, char* argv[]) {
 
     try {
         auto params = parseCommandLine(argc, argv);
+
+        // ── РЛС-режим (--radar) ───────────────────────────────────────────
+        if (params.radarMode) {
+            return runRadarMode(params.radarFile,
+                                params.radarCleanFile,
+                                params.nipThreshold);
+        }
 
         if (params.filterType.empty()) {
             std::cerr << "Ошибка: необходимо указать тип фильтра (-f)" << std::endl;

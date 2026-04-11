@@ -8,277 +8,238 @@
 #include <vector>
 
 /**
- * Класс для визуализации сигналов с использованием OpenGL
+ * Класс для визуализации сигналов с использованием OpenGL.
+ *
+ * Поддерживает два режима:
+ *
+ * 1. Обычный режим (splitView_ = false):
+ *    Одна панель — временной сигнал (original / noisy / filtered).
+ *
+ * 2. Split-view (splitView_ = true, вызов enableSplitView()):
+ *    Верхняя панель (60%): временной сигнал (огибающая |x[n]|)
+ *      - original (чистый),  noisy (с НИП),  filtered (после компенсации)
+ *    Нижняя панель (40%): доплеровский спектр (дБ)
+ *      - specBefore_  (до компенсации)
+ *      - specAfter_   (после компенсации)
+ *      - specDiff_    (разность = подавленная НИП)
  */
 class SignalVisualizer {
 private:
     GLFWwindow* window_;
-    int windowWidth_;
+    int windowWidth_;    ///< Физический размер framebuffer (пиксели GPU)
     int windowHeight_;
+    int logicalWidth_;   ///< Логический размер окна (для hit-test курсора)
+    int logicalHeight_;
     std::string windowTitle_;
 
-    // Данные сигналов
+    // ── Данные временного сигнала ─────────────────────────────────────────
     SignalProcessor::Signal originalSignal_;
     SignalProcessor::Signal noisySignal_;
     SignalProcessor::Signal filteredSignal_;
 
-    // Параметры отображения
+    // ── Данные доплеровского спектра (дБ) ─────────────────────────────────
+    SignalProcessor::Signal specBefore_;   ///< Спектр до компенсации
+    SignalProcessor::Signal specAfter_;    ///< Спектр после компенсации
+    SignalProcessor::Signal specDiff_;     ///< Разность (подавленная НИП)
+
+    // ── Параметры отображения (временная панель) ──────────────────────────
     float minY_, maxY_;
     bool autoScale_;
 
-    // Параметры зума
+    // ── Параметры отображения (спектральная панель) ───────────────────────
+    float specMinY_, specMaxY_;
+
+    // ── Параметры зума ────────────────────────────────────────────────────
     float zoomFactor_;
     float offsetX_;
     float offsetY_;
     float minZoom_;
     float maxZoom_;
 
-    // Флаги видимости сигналов
+    // ── Флаги видимости сигналов (временная панель) ───────────────────────
     bool showOriginal_;
     bool showNoisy_;
     bool showFiltered_;
 
-    // OpenGL объекты (для рисования сигналов/сетки)
+    // ── Флаги видимости спектральных кривых ──────────────────────────────
+    bool showSpecBefore_;
+    bool showSpecAfter_;
+    bool showSpecDiff_;
+
+    // ── Режим split-view ──────────────────────────────────────────────────
+    bool splitView_;           ///< true → верхняя (60%) + нижняя (40%) панели
+    float splitRatio_;         ///< Доля высоты для верхней панели (0..1, по умолч. 0.6)
+
+    // ── OpenGL объекты (временные кривые) ─────────────────────────────────
     GLuint shaderProgram_;
     GLuint originalVAO_, originalVBO_;
-    GLuint noisyVAO_, noisyVBO_;
+    GLuint noisyVAO_,    noisyVBO_;
     GLuint filteredVAO_, filteredVBO_;
 
-    // Шейдерная программа для отрисовки текстур кнопок
+    // ── OpenGL объекты (спектральные кривые) ──────────────────────────────
+    GLuint specBeforeVAO_, specBeforeVBO_;
+    GLuint specAfterVAO_,  specAfterVBO_;
+    GLuint specDiffVAO_,   specDiffVBO_;
+
+    // ── Шейдерная программа для текстурных кнопок ────────────────────────
     GLuint textureShaderProgram_;
 
-    // Цвета для сигналов
+    // ── Цвета ─────────────────────────────────────────────────────────────
     struct Color {
         float r, g, b;
         Color(float r, float g, float b) : r(r), g(g), b(b) {}
     };
 
-    // Параметры прямоугольной кнопки с PNG-иконкой
+    // ── Кнопки переключения ────────────────────────────────────────────────
     struct Button {
         float centerX, centerY;
-        float halfW, halfH;   // полуширина и полувысота в NDC
+        float halfW, halfH;
         Color color;
         bool* visibility;
-        GLuint textureID;     // OpenGL ID текстуры из PNG
-        bool   isHovered;     // курсор над кнопкой?
+        GLuint textureID;
+        bool   isHovered;
 
         Button(float x, float y, float hw, float hh, const Color& c, bool* vis)
             : centerX(x), centerY(y), halfW(hw), halfH(hh),
               color(c), visibility(vis), textureID(0), isHovered(false) {}
     };
 
-    std::vector<Button> toggleButtons_;
+    std::vector<Button> toggleButtons_;   ///< Кнопки временной панели
+    std::vector<Button> specButtons_;     ///< Кнопки спектральной панели
 
-    Color originalColor_;   // Зеленый для чистого сигнала
-    Color noisyColor_;      // Красный для зашумленного сигнала
-    Color filteredColor_;   // Синий для отфильтрованного сигнала
+    Color originalColor_;    // зелёный
+    Color noisyColor_;       // красный
+    Color filteredColor_;    // синий
+    Color specBeforeColor_;  // красный (спектр до)
+    Color specAfterColor_;   // синий (спектр после)
+    Color specDiffColor_;    // жёлтый (разность)
 
 public:
     /**
      * Конструктор
-     * @param width Ширина окна
+     * @param width  Ширина окна
      * @param height Высота окна
-     * @param title Заголовок окна
+     * @param title  Заголовок окна
      */
-    SignalVisualizer(int width = 1200, int height = 800, const std::string& title = "Signal Filter Visualization");
+    SignalVisualizer(int width  = 1200,
+                     int height = 800,
+                     const std::string& title = "Signal Filter Visualization");
 
-    /**
-     * Деструктор
-     */
     ~SignalVisualizer();
 
-    /**
-     * Инициализация OpenGL контекста
-     * @return true при успехе, false при ошибке
-     */
+    // ── Инициализация ─────────────────────────────────────────────────────
+
     bool initialize();
 
+    // ── Данные временного сигнала ─────────────────────────────────────────
+
     /**
-     * Установить данные сигналов для отображения
-     * @param noisy     Зашумлённый сигнал
-     * @param filtered  Отфильтрованный сигнал
-     * @param original  Чистый сигнал (опционально)
+     * Установить данные временного сигнала (обычный режим).
      */
     void setSignalData(const SignalProcessor::Signal& noisy,
-                      const SignalProcessor::Signal& filtered,
-                      const SignalProcessor::Signal& original = {});
+                       const SignalProcessor::Signal& filtered,
+                       const SignalProcessor::Signal& original = {});
+
+    // ── Split-view API ────────────────────────────────────────────────────
 
     /**
-     * Основной цикл отображения
+     * Включить режим split-view.
+     * Вызывать ПОСЛЕ setSignalData().
+     *
+     * @param specBefore  Доплеровский спектр до компенсации (дБ), размер N
+     * @param specAfter   Доплеровский спектр после компенсации (дБ), размер N
+     * @param specDiff    Разность спектров до−после (дБ), размер N
+     * @param ratio       Доля высоты для верхней панели (0.4..0.8, по умолч. 0.6)
      */
+    void enableSplitView(const SignalProcessor::Signal& specBefore,
+                         const SignalProcessor::Signal& specAfter,
+                         const SignalProcessor::Signal& specDiff,
+                         float ratio = 0.6f);
+
+    /**
+     * Отключить split-view (вернуться к обычному режиму).
+     */
+    void disableSplitView();
+
+    // ── Цикл работы ──────────────────────────────────────────────────────
+
     void run();
-
-    /**
-     * Проверка, должно ли окно закрываться
-     */
     bool shouldClose() const;
-
-    /**
-     * Отрисовка одного кадра
-     */
     void render();
-
-    /**
-     * Обработка событий
-     */
     void processEvents();
 
 private:
-    /**
-     * Инициализация GLFW
-     */
+    // ── Инициализация GL ──────────────────────────────────────────────────
     bool initializeGLFW();
-
-    /**
-     * Инициализация GLEW
-     */
     bool initializeGLEW();
-
-    /**
-     * Создание шейдерной программы для линий/сетки
-     */
     bool createShaderProgram();
-
-    /**
-     * Создание шейдерной программы для текстурных кнопок
-     */
     bool createTextureShaderProgram();
-
-    /**
-     * Компиляция шейдера
-     */
     GLuint compileShader(const std::string& source, GLenum type);
+    GLuint loadTexture(const std::string& path);
 
-    /**
-     * Создание VAO/VBO для сигнала
-     */
-    void createSignalBuffers(const SignalProcessor::Signal& signal, GLuint& vao, GLuint& vbo);
-
-    /**
-     * Обновление буферов сигналов
-     */
+    // ── Буферы ────────────────────────────────────────────────────────────
+    void createSignalBuffers(const SignalProcessor::Signal& signal,
+                             GLuint& vao, GLuint& vbo,
+                             float yMin, float yMax,
+                             float xMin = -1.0f, float xMax = 1.0f);
     void updateSignalBuffers();
+    void updateSpectrumBuffers();
 
-    /**
-     * Автоматическое масштабирование сигналов
-     */
+    // ── Масштабирование ───────────────────────────────────────────────────
     void calculateAutoScale();
+    void calculateSpectrumScale();
 
+    // ── Координатные преобразования ───────────────────────────────────────
     /**
-     * Преобразование индекса сигнала в координату X экрана
+     * Преобразование индекса → X в диапазоне [-1, +1].
      */
     float indexToX(size_t index, size_t signalLength) const;
 
     /**
-     * Преобразование значения сигнала в координату Y экрана
+     * Преобразование значения → Y в панельных координатах [-1, +1]
+     * относительно заданного диапазона [yMin, yMax].
      */
-    float valueToY(double value) const;
+    float valueToY(double value, float yMin, float yMax) const;
 
-    /**
-     * Отрисовка сигнала
-     */
+    // ── Отрисовка ─────────────────────────────────────────────────────────
+    void drawTopPanel();
+    void drawBottomPanel();
+
     void drawSignal(GLuint vao, size_t pointCount, const Color& color);
+    void drawGrid(float vpX, float vpY, float vpW, float vpH);
+    void drawAxes(float vpX, float vpY, float vpW, float vpH);
 
-    /**
-     * Отрисовка сетки координат
-     */
-    void drawGrid();
-
-    /**
-     * Отрисовка осей координат
-     */
-    void drawAxes();
-
-    /**
-     * Callback для изменения размера окна
-     */
-    static void framebufferSizeCallback(GLFWwindow* window, int width, int height);
-
-    /**
-     * Callback для обработки клавиш
-     */
-    static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
-    /**
-     * Callback для обработки колеса мыши
-     */
-    static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
-
-    /**
-     * Callback для обработки кликов мыши
-     */
-    static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
-
-    /**
-     * Callback для отслеживания позиции курсора (hover)
-     */
-    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
-
-    /**
-     * Обновить состояние hover для всех кнопок
-     */
-    void updateHoverState(double x, double y);
-
-    /**
-     * Инициализация кнопок переключения (загрузка PNG текстур)
-     */
-    void initializeToggleButtons();
-
-    /**
-     * Загрузка PNG файла как текстуры OpenGL
-     * @return textureID или 0 при ошибке
-     */
-    GLuint loadTexture(const std::string& path);
-
-    /**
-     * Отрисовка кнопок переключения
-     */
     void drawToggleButtons();
-
-    /**
-     * Отрисовка прямоугольной кнопки с PNG-иконкой
-     */
+    void drawSpecButtons();
     void drawRectButton(const Button& button);
 
-    /**
-     * Проверка клика по кнопке
-     */
-    bool isPointInButton(double x, double y, const Button& button) const;
-
-    /**
-     * Обработка клика мыши
-     */
-    void handleMouseClick(double x, double y);
-
-    /**
-     * Увеличить/уменьшить масштаб
-     */
-    void zoom(float factor);
-
-    /**
-     * Панорамирование
-     */
-    void pan(float deltaX, float deltaY);
-
-    /**
-     * Сбросить зум и позицию
-     */
-    void resetView();
-
-    /**
-     * Обновить матрицы трансформации с учетом зума и панорамирования
-     */
-    void updateViewTransform();
-
-    /**
-     * Освобождение текстур кнопок
-     */
+    // ── Кнопки ────────────────────────────────────────────────────────────
+    void initializeToggleButtons();
+    void initializeSpecButtons();
     void cleanupButtonTextures();
 
-    /**
-     * Очистка ресурсов OpenGL
-     */
+    bool isPointInButton(double x, double y, const Button& button) const;
+    bool isPointInSpecButton(double x, double y, const Button& btn) const;
+    void handleMouseClick(double x, double y);
+    void updateHoverState(double x, double y);
+
+    // ── Зум / пан ─────────────────────────────────────────────────────────
+    void zoom(float factor);
+    void pan(float deltaX, float deltaY);
+    void resetView();
+    void updateViewTransform();
+
+    // ── Утилиты ───────────────────────────────────────────────────────────
     void cleanup();
+
+    // ── Колбэки GLFW ──────────────────────────────────────────────────────
+    static void framebufferSizeCallback(GLFWwindow* window, int width, int height);
+    static void keyCallback(GLFWwindow* window, int key, int scancode,
+                            int action, int mods);
+    static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+    static void mouseButtonCallback(GLFWwindow* window, int button,
+                                    int action, int mods);
+    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 };
 
 #endif // SIGNAL_VISUALIZER_H
